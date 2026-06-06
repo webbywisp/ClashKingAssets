@@ -578,11 +578,123 @@ class StaticUpdater:
 
         return list(new_achievement_data.values())
 
+    @staticmethod
+    def _combat_target_type(air_targets, ground_targets):
+        if air_targets and ground_targets:
+            return "air & ground"
+        if air_targets:
+            return "air"
+        if ground_targets:
+            return "ground"
+        return None
+
+    @staticmethod
+    def _combat_range(attack_range):
+        # AttackRange is stored in hundredths of a tile (e.g. 1000 -> 10)
+        tiles = attack_range / 100
+        return int(tiles) if tiles == int(tiles) else tiles
+
+    @staticmethod
+    def _combat_damage_type(damage_radius, multi_targets):
+        # splash hits an area, multi locks onto several targets at once, single hits one target
+        if damage_radius:
+            return "splash"
+        if multi_targets:
+            return "multi"
+        return "single"
+
+    def _spell_tower_modes(self, building_data, weapon_data, projectile_data, spell_data):
+        # spell towers have no default attack; each level unlocks a selectable spell mode
+        # (rage/poison/invisibility/earthquake). Each mode exposes how far the tower reaches to
+        # cast (range, the weapon's attack range) and the area of effect of the spell it drops
+        # (effect_radius, defined on the spell that the weapon's projectile spawns).
+        modes = []
+        seen = set()
+        for level_data in building_data.values():
+            if not isinstance(level_data, dict):
+                continue
+            mode_key = level_data.get("UnlockWeaponMode")
+            if not mode_key or mode_key in seen:
+                continue
+            weapon = weapon_data.get(mode_key)
+            if weapon is None:
+                continue
+            seen.add(mode_key)
+            projectile = projectile_data.get(weapon.get("Projectile"), {})
+            spell = spell_data.get(projectile.get("HitSpell"), {})
+            mode = {
+                "name": self._translate(tid=weapon.get("ShortTID")),
+                "unlocked_at_level": level_data.get("BuildingLevel"),
+            }
+            # range is how far the tower reaches to cast; effect_radius is the spell's area of effect
+            cast_range = weapon.get("AttackRange")
+            if cast_range is not None:
+                mode["range"] = self._combat_range(cast_range)
+            spell_radius = spell.get("Radius")
+            if spell_radius is not None:
+                mode["effect_radius"] = self._combat_range(spell_radius)
+            mode["target_type"] = self._combat_target_type(
+                bool(weapon.get("AirTargets")), bool(weapon.get("GroundTargets"))
+            )
+            modes.append(mode)
+        return modes
+
+    def _parse_combat_stats(self, building_data, weapon_data, projectile_data, spell_data):
+        # combat stats for buildings that attack (defenses); returns {} for non-attacking buildings
+        spell_modes = self._spell_tower_modes(building_data, weapon_data, projectile_data, spell_data)
+        if spell_modes:
+            # spell towers have no default attack, only selectable modes
+            return {"alt_modes": spell_modes}
+
+        attack_range = building_data.get("AttackRange")
+        if attack_range is None:
+            return {}
+
+        stats = {
+            "range": self._combat_range(attack_range),
+            "target_type": self._combat_target_type(
+                bool(building_data.get("AirTargets")), bool(building_data.get("GroundTargets"))
+            ),
+            "damage_type": self._combat_damage_type(
+                building_data.get("DamageRadius"), building_data.get("MultiTargets")
+            ),
+        }
+        if building_data.get("DamageRadius"):
+            stats["damage_radius"] = self._combat_range(building_data.get("DamageRadius"))
+        # splash defenses (mortar, scattershot, eagle artillery, ...) have an inner dead zone:
+        # they can only hit targets between min_range and range
+        if building_data.get("MinAttackRange"):
+            stats["min_range"] = self._combat_range(building_data.get("MinAttackRange"))
+
+        # some defenses have a second, selectable attack mode with its own range/targeting
+        # (e.g. X-Bow ground vs ground+air, Inferno single vs multi, geared-up Cannon/Archer Tower/Mortar).
+        # Modes are complete objects so consumers never have to merge them with the base stats.
+        if building_data.get("AltAttackMode") and building_data.get("AltAttackRange") is not None:
+            alt = {
+                "name": self._translate(tid=building_data.get("AlternateModeTID")),
+                "range": self._combat_range(building_data.get("AltAttackRange")),
+                "target_type": self._combat_target_type(
+                    bool(building_data.get("AltAirTargets")), bool(building_data.get("AltGroundTargets"))
+                ),
+                "damage_type": self._combat_damage_type(
+                    building_data.get("DamageRadius"), building_data.get("AltMultiTargets")
+                ),
+            }
+            if "damage_radius" in stats:
+                alt["damage_radius"] = stats["damage_radius"]
+            if "min_range" in stats:
+                alt["min_range"] = stats["min_range"]
+            stats["alt_modes"] = [alt]
+
+        return stats
+
     def _parse_building_data(self):
         self.full_building_data = self.open_file("logic/buildings.json")
         self.full_supercharges_data = self.open_file("logic/mini_levels.json")
         self.full_townhall_data = self.open_file("logic/townhall_levels.json")
         full_weapon_data: dict = self.open_file("logic/weapons.json")
+        full_projectile_data: dict = self.open_file("logic/projectiles.json")
+        full_spell_data: dict = self.open_file("logic/spells.json")
 
         new_building_data = []
 
@@ -645,6 +757,10 @@ class StaticUpdater:
                 "superchargeable": superchargeable,
                 "levels": [],
             }
+
+            hold_data.update(
+                self._parse_combat_stats(building_data, full_weapon_data, full_projectile_data, full_spell_data)
+            )
 
             # put seasonal defense onto the crafting station
             if building_data.get("GlobalID") == 1000097:

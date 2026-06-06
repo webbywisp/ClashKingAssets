@@ -2312,6 +2312,17 @@
           "strength_weight": 1665
         }
       ],
+      "range": 9,
+      "target_type": "ground",
+      "damage_type": "single",
+      "alt_modes": [
+        {
+          "name": "Burst Cannon",
+          "range": 7,
+          "target_type": "ground",
+          "damage_type": "single"
+        }
+      ],
       "gear_up": {
         "level_required": 3,
         "resource": "Gold",
@@ -2520,6 +2531,17 @@
           "hitpoints": 1800,
           "dps": 145,
           "strength_weight": 1577
+        }
+      ],
+      "range": 10,
+      "target_type": "air & ground",
+      "damage_type": "single",
+      "alt_modes": [
+        {
+          "name": "Fast Attack Archer Tower",
+          "range": 8,
+          "target_type": "air & ground",
+          "damage_type": "single"
         }
       ],
       "gear_up": {
@@ -2916,7 +2938,11 @@
             ]
           }
         }
-      ]
+      ],
+      "range": 7,
+      "target_type": "air & ground",
+      "damage_type": "splash",
+      "damage_radius": 1
     },
     {
       "_id": 1000012,
@@ -3095,7 +3121,10 @@
             ]
           }
         }
-      ]
+      ],
+      "range": 10,
+      "target_type": "air",
+      "damage_type": "single"
     },
     {
       "_id": 1000013,
@@ -3291,6 +3320,21 @@
               }
             ]
           }
+        }
+      ],
+      "range": 11,
+      "target_type": "ground",
+      "damage_type": "splash",
+      "damage_radius": 1.5,
+      "min_range": 4,
+      "alt_modes": [
+        {
+          "name": "Burst Mortar",
+          "range": 11,
+          "target_type": "ground",
+          "damage_type": "splash",
+          "damage_radius": 1.5,
+          "min_range": 4
         }
       ],
       "gear_up": {
@@ -3537,7 +3581,10 @@
             ]
           }
         }
-      ]
+      ],
+      "range": 7,
+      "target_type": "air & ground",
+      "damage_type": "single"
     },
     {
       "_id": 1000019,
@@ -3725,7 +3772,10 @@
             ]
           }
         }
-      ]
+      ],
+      "range": 7,
+      "target_type": "air & ground",
+      "damage_type": "single"
     },
     {
       "_id": 1000020,
@@ -3964,6 +4014,17 @@
               }
             ]
           }
+        }
+      ],
+      "range": 14,
+      "target_type": "ground",
+      "damage_type": "single",
+      "alt_modes": [
+        {
+          "name": "Ground & Air Targeting X-Bow",
+          "range": 11.5,
+          "target_type": "air & ground",
+          "damage_type": "single"
         }
       ]
     },
@@ -4470,6 +4531,17 @@
             ]
           }
         }
+      ],
+      "range": 9,
+      "target_type": "air & ground",
+      "damage_type": "single",
+      "alt_modes": [
+        {
+          "name": "Multi Target Inferno Tower",
+          "range": 10,
+          "target_type": "air & ground",
+          "damage_type": "multi"
+        }
       ]
     },
     {
@@ -4549,7 +4621,11 @@
           "dps": 0,
           "strength_weight": 1653
         }
-      ]
+      ],
+      "range": 15,
+      "target_type": "air",
+      "damage_type": "single",
+      "min_range": 1
     },
     {
       "_id": 1000029,
@@ -4700,7 +4776,12 @@
           "dps": 50,
           "strength_weight": 67000
         }
-      ]
+      ],
+      "range": 50,
+      "target_type": "air & ground",
+      "damage_type": "splash",
+      "damage_radius": 3,
+      "min_range": 7
     },
     {
       "_id": 1000032,
@@ -4852,7 +4933,11 @@
             ]
           }
         }
-      ]
+      ],
+      "range": 6,
+      "target_type": "ground",
+      "damage_type": "splash",
+      "damage_radius": 1.5
     },
     {
       "_id": 1000033,
@@ -6186,7 +6271,10 @@
           "dps": 120,
           "strength_weight": 4800
         }
-      ]
+      ],
+      "range": 7,
+      "target_type": "ground",
+      "damage_type": "single"
     },
     {
       "_id": 1000042,
@@ -6307,7 +6395,10 @@
           "dps": 85,
           "strength_weight": 4600
         }
-      ]
+      ],
+      "range": 7,
+      "target_type": "air & ground",
+      "damage_type": "single"
     },
     {
       "_id": 1000044,
@@ -6413,7 +6504,10 @@
           "dps": 132,
           "strength_weight": 3800
         }
-      ]
+      ],
+      "range": 8.5,
+      "target_type": "ground",
+      "damage_type": "single"
     },
     {
       "_id": 1000045,
@@ -6519,7 +6613,12 @@
           "dps": 88,
           "strength_weight": 5200
         }
-      ]
+      ],
+      "range": 11,
+      "target_type": "ground",
+      "damage_type": "splash",
+      "damage_radius": 3,
+      "min_range": 4
     },
     {
       "_id": 1000046,
@@ -6736,6 +6835,17 @@
           "dps": 94,
           "strength_weight": 4200
         }
+      ],
+      "range": 10,
+      "target_type": "air & ground",
+      "damage_type": "single",
+      "alt_modes": [
+        {
+          "name": "Fast Attack Archer Tower",
+          "range": 7,
+          "target_type": "air & ground",
+          "damage_type": "single"
+        }
       ]
     },
     {
@@ -6857,7 +6967,10 @@
           "dps": 44,
           "strength_weight": 3800
         }
-      ]
+      ],
+      "range": 9,
+      "target_type": "air",
+      "damage_type": "single"
     },
     {
       "_id": 1000051,
@@ -7069,7 +7182,10 @@
           "dps": 896,
           "strength_weight": 5400
         }
-      ]
+      ],
+      "range": 7.5,
+      "target_type": "air & ground",
+      "damage_type": "single"
     },
     {
       "_id": 1000053,
@@ -7190,7 +7306,11 @@
           "dps": 637,
           "strength_weight": 5200
         }
-      ]
+      ],
+      "range": 7.5,
+      "target_type": "air",
+      "damage_type": "splash",
+      "damage_radius": 1.5
     },
     {
       "_id": 1000055,
@@ -7296,7 +7416,11 @@
           "dps": 1037,
           "strength_weight": 5000
         }
-      ]
+      ],
+      "range": 2.3,
+      "target_type": "ground",
+      "damage_type": "splash",
+      "damage_radius": 2.8
     },
     {
       "_id": 1000056,
@@ -7402,7 +7526,11 @@
           "dps": 36,
           "strength_weight": 5400
         }
-      ]
+      ],
+      "range": 7,
+      "target_type": "air & ground",
+      "damage_type": "splash",
+      "damage_radius": 1.2
     },
     {
       "_id": 1000057,
@@ -7508,7 +7636,10 @@
           "dps": 483,
           "strength_weight": 5400
         }
-      ]
+      ],
+      "range": 9.5,
+      "target_type": "ground",
+      "damage_type": "single"
     },
     {
       "_id": 1000058,
@@ -7798,7 +7929,12 @@
           "dps": 118,
           "strength_weight": 5400
         }
-      ]
+      ],
+      "range": 13,
+      "target_type": "ground",
+      "damage_type": "splash",
+      "damage_radius": 3,
+      "min_range": 6
     },
     {
       "_id": 1000064,
@@ -7967,7 +8103,12 @@
             ]
           }
         }
-      ]
+      ],
+      "range": 10,
+      "target_type": "air & ground",
+      "damage_type": "splash",
+      "damage_radius": 1,
+      "min_range": 3
     },
     {
       "_id": 1000068,
@@ -8339,6 +8480,36 @@
           "dps": 0,
           "strength_weight": 15000
         }
+      ],
+      "alt_modes": [
+        {
+          "name": "Rage",
+          "unlocked_at_level": 1,
+          "range": 9,
+          "effect_radius": 5.01,
+          "target_type": "air & ground"
+        },
+        {
+          "name": "Poison",
+          "unlocked_at_level": 2,
+          "range": 9,
+          "effect_radius": 5,
+          "target_type": "air & ground"
+        },
+        {
+          "name": "Invisibility",
+          "unlocked_at_level": 3,
+          "range": 4.5,
+          "effect_radius": 4.5,
+          "target_type": "air & ground"
+        },
+        {
+          "name": "Earthquake",
+          "unlocked_at_level": 4,
+          "range": 9,
+          "effect_radius": 4.7,
+          "target_type": "ground"
+        }
       ]
     },
     {
@@ -8410,7 +8581,10 @@
             ]
           }
         }
-      ]
+      ],
+      "range": 11,
+      "target_type": "air & ground",
+      "damage_type": "single"
     },
     {
       "_id": 1000078,
@@ -8582,6 +8756,17 @@
             ]
           }
         }
+      ],
+      "range": 12,
+      "target_type": "air & ground",
+      "damage_type": "single",
+      "alt_modes": [
+        {
+          "name": "Fast Attack Multi-Gear Tower",
+          "range": 8,
+          "target_type": "air & ground",
+          "damage_type": "single"
+        }
       ]
     },
     {
@@ -8657,6 +8842,17 @@
           "hitpoints": 2600,
           "dps": 117,
           "strength_weight": 5400
+        }
+      ],
+      "range": 12,
+      "target_type": "ground",
+      "damage_type": "single",
+      "alt_modes": [
+        {
+          "name": "Air Targeting X-Bow",
+          "range": 12,
+          "target_type": "air",
+          "damage_type": "single"
         }
       ]
     },
@@ -8828,7 +9024,10 @@
             ]
           }
         }
-      ]
+      ],
+      "range": 10,
+      "target_type": "air & ground",
+      "damage_type": "multi"
     },
     {
       "_id": 1000085,
@@ -8913,7 +9112,10 @@
             ]
           }
         }
-      ]
+      ],
+      "range": 9,
+      "target_type": "ground",
+      "damage_type": "single"
     },
     {
       "_id": 1000086,
@@ -8966,7 +9168,10 @@
             ]
           }
         }
-      ]
+      ],
+      "range": 11,
+      "target_type": "air & ground",
+      "damage_type": "single"
     },
     {
       "_id": 1000089,
@@ -9028,7 +9233,10 @@
             ]
           }
         }
-      ]
+      ],
+      "range": 16,
+      "target_type": "air & ground",
+      "damage_type": "single"
     },
     {
       "_id": 1000093,
@@ -10053,7 +10261,10 @@
             ]
           }
         }
-      ]
+      ],
+      "range": 8,
+      "target_type": "air & ground",
+      "damage_type": "single"
     }
   ],
   "traps": [
