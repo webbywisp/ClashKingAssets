@@ -90,9 +90,9 @@ def purge_once(config: WorkerPurgeConfig, tags: list[str]) -> None:
                     response.status != 200
                     or not isinstance(result, dict)
                     or result.get('success') is not True
-                    or result.get('scope') != 'AssetOrigin'
+                    or result.get('scope') != 'Assets'
                 ):
-                    raise WorkerPurgeError('Assets Worker did not confirm an AssetOrigin cache purge')
+                    raise WorkerPurgeError('Assets Worker did not confirm its public cache purge')
                 return
         except urllib.error.HTTPError as exc:
             if exc.code not in (429, 500, 502, 503, 504):
@@ -132,6 +132,6 @@ if __name__ == '__main__':
         if config is None:
             raise WorkerPurgeError('Assets Worker purge is not configured')
         purge_worker_cache(config, args.keys)
-        print(json.dumps({'success': True, 'scope': 'AssetOrigin', 'passes': 2}))
+        print(json.dumps({'success': True, 'scope': 'Assets', 'passes': 2}))
     except WorkerPurgeError as exc:
         raise SystemExit(str(exc)) from None

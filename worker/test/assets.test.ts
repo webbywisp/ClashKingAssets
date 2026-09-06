@@ -2,16 +2,16 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import {
-  canonicalRequest, clientResponse, notModified, originalRange, parseAssetRequest,
+  clientResponse, notModified, parseAssetRequest,
   purgeRequest, serveAsset, SIZES, transformOptions, YEAR, assetCacheTag,
 } from '../src/assets.ts';
 
-test('version queries no longer partition the cache', () => {
+test('legacy version queries do not change the requested representation', () => {
   const sha = 'a'.repeat(64);
   for (const path of ['item.webp', 'item.avif?size=256']) {
     const separator = path.includes('?') ? '&' : '?';
     const asset = parseAssetRequest(new URL(`https://assets.clashk.ing/${path}${separator}v=${sha}`));
-    assert.equal(canonicalRequest(asset).url, `https://assets.internal/${path}`);
+    assert.equal(asset.path, `/${path}`);
   }
   assert.equal(parseAssetRequest(new URL('https://assets.clashk.ing/item.webp?v=random')).path, '/item.webp');
 });
@@ -59,21 +59,18 @@ function fixture(files: Record<string, string>) {
 }
 const req = (path: string, init?: RequestInit) => new Request('https://assets.clashk.ing' + path, init);
 
-test('canonical keys distinguish every size and format and discard arbitrary cache busters', () => {
-  const keys = new Set<string>();
+test('request parsing distinguishes every size and format while ignoring unrelated parameters', () => {
+  const representations = new Set<string>();
   for (const ext of ['avif', 'webp', 'png', 'json']) {
     for (const size of [undefined, ...SIZES]) {
       const path = `/troops/barbarian.${ext}` + (size ? `?size=${size}` : '');
       const parsed = parseAssetRequest(new URL(req(path).url));
-      const inner = canonicalRequest(parsed);
-      keys.add(inner.url);
-      assert.equal(inner.method, 'GET');
-      assert.equal([...inner.headers].length, 0);
+      representations.add(parsed.path);
       const dirty = parseAssetRequest(new URL(req(path + (size ? '&' : '?') + 'url=https://evil.test/x&quality=1').url));
-      assert.equal(canonicalRequest(dirty).url, inner.url);
+      assert.deepEqual(dirty, parsed);
     }
   }
-  assert.equal(keys.size, 9); // Six AVIF recipes plus three unmodified originals.
+  assert.equal(representations.size, 9); // Six AVIF recipes plus three unmodified originals.
   assert.equal(parseAssetRequest(new URL(req('/troops/%62arbarian.avif?%73ize=128').url)).path,
     '/troops/barbarian.avif?size=128');
 });
@@ -138,15 +135,16 @@ test('original image, JSON, font and other asset consumers receive original byte
     assert.equal(response.headers.get('Content-Type'), type);
     assert.equal(response.headers.get('Access-Control-Allow-Origin'), '*');
     assert.equal(response.headers.get('Last-Modified'), 'Tue, 01 Sep 2026 12:00:00 GMT');
+    assert.equal(response.headers.get('Accept-Ranges'), 'bytes');
     assert.equal(calls.output.length, 0);
   }
 });
 
-test('mutable JSON has edge freshness, client revalidation, weak/list ETags, HEAD and 304', async () => {
+test('static JSON uses the release-purged edge cache and supports client revalidation, HEAD and 304', async () => {
   const { env } = fixture({ 'static_data.json': '{"new":true}' });
   const response = () => serveAsset(req('/static_data.json'), env);
   const initial = await response();
-  assert.equal(initial.headers.get('Cloudflare-CDN-Cache-Control'), 'public, max-age=60');
+  assert.equal(initial.headers.get('Cloudflare-CDN-Cache-Control'), `public, max-age=${YEAR}`);
   assert.equal(initial.headers.get('Cache-Control'), 'public, max-age=0, must-revalidate');
   for (const condition of ['"abc"', 'W/"abc"', '"other", W/"abc"', '*']) {
     const result = await clientResponse(req('/static_data.json', { headers: { 'If-None-Match': condition } }), await response());
@@ -158,22 +156,11 @@ test('mutable JSON has edge freshness, client revalidation, weak/list ETags, HEA
   const head = await clientResponse(req('/static_data.json', { method: 'HEAD' }), await response());
   assert.equal(await head.text(), '');
   assert.equal(head.headers.get('Content-Length'), '12');
-  assert.equal(head.headers.get('Cloudflare-CDN-Cache-Control'), null);
+  assert.equal(head.headers.get('Cloudflare-CDN-Cache-Control'), `public, max-age=${YEAR}`);
   const headers = initial.headers;
   assert.equal(notModified(req('/', { headers: { 'If-Modified-Since': headers.get('Last-Modified')! } }), headers), true);
   assert.equal(notModified(req('/', { headers: { 'If-None-Match': '"old"', 'If-Modified-Since': 'Wed, 01 Sep 2027 12:00:00 GMT' } }), headers), false);
   assert.equal(notModified(req('/', { headers: { 'If-Modified-Since': 'invalid' } }), headers), false);
-});
-
-test('original byte ranges support audio and do not fragment the inner cache', async () => {
-  const { env } = fixture({ 'music.ogg': '0123456789' });
-  const asset = parseAssetRequest(new URL(req('/music.ogg').url));
-  const response = await originalRange(req('/music.ogg', { headers: { Range: 'bytes=2-5' } }), asset, env);
-  assert.equal(response!.status, 206);
-  assert.equal(await response!.text(), '2345');
-  assert.equal(response!.headers.get('Content-Range'), 'bytes 2-5/10');
-  assert.equal((await originalRange(req('/music.ogg', { headers: { Range: 'bytes=99-' } }), asset, env))!.status, 416);
-  assert.equal(await originalRange(req('/music.ogg', { headers: { Range: 'bytes=0-1', 'If-Range': '"old"' } }), asset, env), null);
 });
 
 test('purge requires POST, configured strong secret, auth, bounded tags and exact scope', async () => {
@@ -192,17 +179,17 @@ test('purge requires POST, configured strong secret, auth, bounded tags and exac
   assert.equal((await call(req('/__admin/purge', { ...authorized, body: 'x'.repeat(8001) }))).status, 413);
   assert.equal(count, 0);
   const response = await call(req('/__admin/purge', authorized));
-  assert.deepEqual(await response.json(), { success: true, scope: 'AssetOrigin' });
+  assert.deepEqual(await response.json(), { success: true, scope: 'Assets' });
   assert.equal(response.headers.get('Cache-Control'), 'no-store');
   assert.equal(count, 1);
   assert.equal((await purgeRequest(req('/__admin/purge', authorized), secret, 'true', async () => ({ success: false }))).status, 502);
   assert.equal((await purgeRequest(req('/__admin/purge', authorized), secret, 'true', async () => { throw Error('secret'); })).status, 502);
 });
 
-test('wrangler enables cache only for the asset entrypoint and owns the production domain', () => {
+test('wrangler enables tiered caching on the public entrypoint and owns the production domain', () => {
   const config = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
-  assert.equal(config.exports.default.cache.enabled, false);
-  assert.equal(config.exports.AssetOrigin.cache.enabled, true);
+  assert.equal(config.cache.enabled, true);
+  assert.equal(config.exports, undefined);
   assert.equal(config.cache.cross_version_cache, false);
   assert.deepEqual(config.routes, [{ pattern: 'assets.clashk.ing', custom_domain: true }]);
   assert.equal(config.workers_dev, false);

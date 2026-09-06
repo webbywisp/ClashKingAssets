@@ -49,30 +49,30 @@ length/range headers; it does not expose purge credentials.
 
 ## Cache and freshness
 
-`AssetsGateway` (default export) has caching disabled. It constructs a canonical,
-header-free GET to `ctx.exports.AssetOrigin.fetch()`. **AssetOrigin owns the only
-response cache**, with the new tiered Workers Cache enabled. It reads private R2
-and streams bytes into the Images binding on a transformation miss. There is no
-KV image cache, legacy Cache API, public-origin fetch, saved R2 variant or generated
-AVIF committed to Git.
+The public Worker entrypoint uses Cloudflare's tiered Workers Cache. Cloudflare
+checks the lower and upper cache tiers before invoking Worker code, so a warm hit
+does not execute the Worker or make an internal Worker request. On a miss, the
+entrypoint reads private R2 and streams bytes into the Images binding when AVIF
+conversion is needed. There is no KV image cache, legacy Cache API, public-origin
+fetch, saved R2 variant or generated AVIF committed to Git.
 
 Before transforming a raster, the Worker inspects up to 64 KiB of container
 headers and then streams the original bytes into Images. Animated WebP/APNG and
 AVIF sequences return an uncached 422 so the app uses the original animation.
 Unusually long unclassified headers also fall back instead of risking flattening.
 
-The canonical path includes the output extension and, for AVIF, the single size
-parameter. That gives at most six AVIF recipe keys per known stem. Requests do not
-forward cookies, Authorization, user-controlled version keys, method overrides,
-conditional headers or cache-bypass headers to AssetOrigin. GET/HEAD share a body
-fill. Worker version isolation stays enabled; a deployment gets a fresh namespace.
-Errors are never stored and there is no negative-cache invalidation dependency.
+The representation includes the output extension and, for AVIF, the single size
+parameter. That gives at most six intended AVIF recipes per known stem. Workers
+Cache may store separate entries for extra query parameters, but every variant
+receives the same family tag and is cleared by the same release purge. GET/HEAD
+share a body fill. Worker version isolation stays enabled, so a deployment gets a
+fresh namespace. Errors are never stored and there is no negative-cache dependency.
 
-Clients receive `public, max-age=0, must-revalidate`, while AssetOrigin
-sets `Cloudflare-CDN-Cache-Control: public, max-age=60` for JSON and a one-year
-lifetime for other assets. Releases also purge affected entries; the JSON TTL is
-a fallback, not a replacement for release invalidation.
-The gateway evaluates
+Clients receive `public, max-age=0, must-revalidate`, while the Worker sets a
+one-year `Cloudflare-CDN-Cache-Control` lifetime for every asset, including JSON.
+Releases purge affected entries before publishing the new manifest, so changed
+JSON becomes visible immediately without shortening the normal cache lifetime.
+On a cache miss, the Worker evaluates
 If-None-Match (including weak tags, lists and wildcard), then If-Modified-Since,
 against the cached metadata and returns 304 without a body when appropriate.
 If-None-Match takes precedence. HEAD returns the same Last-Modified, ETag and
@@ -116,7 +116,7 @@ accepts only explicit tags, not a whole-cache purge. Manual retries can use
 The helper batches tags in groups of 100 and makes two passes, 60 seconds apart,
 to reduce stale in-flight fills. This is not an atomic upload/cache transaction;
 live staging must verify propagation. Retry a failed release with the same file
-changes. A zone purge does not clear the AssetOrigin entrypoint cache.
+changes. The endpoint purges the public Worker's cache directly.
 
 ## Configuration and local checks
 
@@ -145,10 +145,10 @@ From the repository root, run:
 .venv/bin/python -m ruff check build.py worker_purge.py check_image_sources.py tests/test_worker_purge.py
 ```
 
-Tests cover source mapping, size bounds/options, cache-key normalization, real AVIF
-precedence, original and range handling, JSON conditions, authentication and
-entrypoint scope, and selective release-triggered purges. Bindings and entrypoint contexts
-are mocked; these tests do not establish live tiered-cache behavior, AVIF encoder
+Tests cover source mapping, size bounds/options, request normalization, real AVIF
+precedence, original and range headers, JSON conditions, authentication and
+public-cache scope, and selective release-triggered purges. Bindings and entrypoint
+contexts are mocked; these tests do not establish live tiered-cache behavior, AVIF encoder
 output, custom-domain readiness or purge propagation. No visual tests are used.
 
 ## Production migration checklist
@@ -164,8 +164,8 @@ output, custom-domain readiness or purge propagation. No visual tests are used.
 3. Deploy staging only after approval. Use HTTP/code-level probes to compare
    original byte hashes and content types; inspect transformed dimensions and
    aspect ratio/no-upscale; request each size and format in alternating order and
-   inspect cache status/logs. Different query garbage and headers must converge on
-   the canonical inner key. Confirm gateway and AssetOrigin logs distinguish hits.
+   inspect cache status/logs. Confirm that a cold request invokes the Worker and a
+   repeated warm request is returned before the Worker runs.
 4. Verify cached JSON/image reads, conditional GET and HEAD behavior. Same-path
    overwrites remain cached until the selective release purge or cache expiry.
 5. Pause asset releases and other R2 writers for the production migration. Prepare
@@ -177,10 +177,11 @@ output, custom-domain readiness or purge propagation. No visual tests are used.
    `wrangler.jsonc`. Keep the hostname and all object keys unchanged.
    Disable any remaining public R2 access only after private-binding reads work.
    No `r2.clashk.ing` hostname is needed. Clear old zone/R2 cache as part of retiring
-   that serving path; this is separate from the new AssetOrigin cache purge.
+   that serving path; releases subsequently purge the public Workers Cache by tag.
 7. Repeat production read/conditional/CORS probes. Configure the GitHub Worker
    purge URL and matching token described above before resuming releases. Query
-   cache-busters are deliberately discarded and do not force fresh edge content.
+   Extra cache-buster parameters do not change the selected representation and
+   every variant remains covered by the asset family's release-purge tag.
 8. If cutover fails, pause releases, detach the Worker custom domain, restore the
    recorded R2 custom domain/public settings and prior DNS, and verify original
    URLs before resuming. Do not delete bucket objects or deployment history.
@@ -235,15 +236,14 @@ remain under `assets`. URLs and file extensions are derived from paths.
   configuration; `cross_version_cache` is global, not inside an export override.
 - [Cache keys](https://developers.cloudflare.com/workers/cache/cache-keys/)
   include path/query, entrypoint and version, with additional header partitions.
-  This is why normalization happens in the uncached gateway before the cache.
+  Extra query variants can reduce hit rate, but shared tags keep release purging correct.
 - [Purge API](https://developers.cloudflare.com/workers/cache/purge/) specifies
   entrypoint scope, `purgeEverything`, result checking and rate limiting. Zone
   purge does not affect Workers Cache. Its rate limits use the Free-tier purge
   limits irrespective of the zone plan; backoff remains necessary.
 - [Workers Cache pricing](https://developers.cloudflare.com/workers/cache/#pricing)
-  charges requests even on hits, including cached loopback fetches; hits avoid
-  origin-entrypoint CPU. Budget for the public gateway invocation plus the cached
-  AssetOrigin invocation, not zero-cost cache hits. The gateway runs every time.
+  charges requests on hits, but a hit avoids Worker execution, R2 reads and Images
+  conversion. There is no additional loopback Worker request.
 - [Images binding](https://developers.cloudflare.com/images/optimization/binding/)
   accepts private R2 bytes and recommends Workers Cache. It does not retain a
   response cache itself; an uncached call decodes/re-encodes again.

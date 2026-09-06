@@ -63,7 +63,7 @@ def test_purge_posts_secret_only_to_fixed_operation_and_does_two_passes(monkeypa
         assert request.headers['User-agent'] == worker_purge.USER_AGENT
         assert timeout == 30
         events.append('purge')
-        return response({'success': True, 'scope': 'AssetOrigin'})
+        return response({'success': True, 'scope': 'Assets'})
 
     opener.open.side_effect = open_request
     monkeypatch.setattr(worker_purge.urllib.request, 'build_opener', lambda handler: opener)

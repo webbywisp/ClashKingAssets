@@ -33,12 +33,6 @@ export function parseAssetRequest(url: URL): AssetRequest {
     (query.size ? `?${query}` : '') };
 }
 
-export function canonicalRequest(asset: AssetRequest): Request {
-  // Construct fresh headers: cookies, validators, cache bypasses, Vary inputs,
-  // method overrides and version-key headers must never fragment the inner cache.
-  return new Request(`https://assets.internal${asset.path}`, { method: 'GET' });
-}
-
 export function transformOptions(size?: number): ImageTransform {
   return size === undefined ? {} : { width: size, height: size, fit: 'scale-down' };
 }
@@ -68,8 +62,8 @@ function assetHeaders(object: R2Object, key: string, transformed: boolean, size?
   // A weak validator identifies this recipe/source version without claiming byte identity.
   headers.set('ETag', transformed ? `W/"${object.etag}-avif-q80-v1-${size ?? 'full'}"` : object.httpEtag);
   headers.set('Cache-Control', 'public, max-age=0, must-revalidate');
-  // Mutable game metadata must refresh without any release-triggered purge.
-  headers.set('Cloudflare-CDN-Cache-Control', `public, max-age=${ext === 'json' ? 60 : YEAR}`);
+  // Releases purge every changed asset tag before publishing the new manifest.
+  headers.set('Cloudflare-CDN-Cache-Control', `public, max-age=${YEAR}`);
   headers.set('Access-Control-Allow-Origin', '*');
   headers.set('Access-Control-Expose-Headers', 'ETag, Last-Modified, Content-Length, Content-Range, Accept-Ranges');
   headers.set('X-Content-Type-Options', 'nosniff');
@@ -141,8 +135,6 @@ export function notModified(request: Request, headers: Headers): boolean {
 
 export async function clientResponse(request: Request, response: Response): Promise<Response> {
   const headers = new Headers(response.headers);
-  // The gateway itself is explicitly uncached; this header is only for AssetOrigin.
-  headers.delete('Cloudflare-CDN-Cache-Control');
   if (response.status === 200 && notModified(request, headers)) {
     await response.body?.cancel();
     headers.delete('Content-Length');
@@ -197,42 +189,9 @@ export async function purgeRequest(
   try {
     const result = await purge(tags);
     if (!result.success) return errorResponse(502, 'Worker cache purge rejected; retry after backoff');
-    return new Response(JSON.stringify({ success: true, scope: 'AssetOrigin' }), { headers: {
+    return new Response(JSON.stringify({ success: true, scope: 'Assets' }), { headers: {
       'Content-Type': 'application/json', 'Cache-Control': 'no-store',
       'Cloudflare-CDN-Cache-Control': 'no-store',
     } });
   } catch { return errorResponse(502, 'Worker cache purge failed; retry after backoff'); }
-}
-
-// Original-file byte ranges bypass the response cache; useful for audio, PDFs and GLBs.
-export async function originalRange(request: Request, asset: AssetRequest, env: AssetEnv): Promise<Response | null> {
-  if (request.method !== 'GET' || asset.key.endsWith('.avif')) return null;
-  const value = request.headers.get('Range');
-  if (!value) return null;
-  const match = /^bytes=(\d*)-(\d*)$/.exec(value);
-  // Ignore malformed/multiple ranges as permitted by HTTP, returning the full representation.
-  if (!match || (!match[1] && !match[2])) return null;
-  const object = await env.ASSETS.head(asset.key);
-  if (!object) return errorResponse(404, 'Asset not found');
-  const headers = assetHeaders(object, asset.key, false);
-  if (notModified(request, headers)) return new Response(null, { status: 304, headers });
-  const ifRange = request.headers.get('If-Range');
-  if (ifRange && ifRange !== object.httpEtag &&
-      !(Date.parse(ifRange) >= Date.parse(object.uploaded.toUTCString()))) return null;
-  const start = match[1] ? Number(match[1]) : Math.max(0, object.size - Number(match[2]));
-  const end = match[1] && match[2] ? Math.min(Number(match[2]), object.size - 1) : object.size - 1;
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= object.size) {
-    const response = errorResponse(416, 'Range not satisfiable');
-    response.headers.set('Content-Range', `bytes */${object.size}`);
-    return response;
-  }
-  const body = await env.ASSETS.get(asset.key, {
-    range: { offset: start, length: end - start + 1 }, onlyIf: { etagMatches: object.etag },
-  });
-  // A concurrent overwrite must not produce old headers with a new body's range.
-  if (!body || !('body' in body)) return null;
-  headers.set('Content-Range', `bytes ${start}-${end}/${object.size}`);
-  headers.set('Content-Length', String(end - start + 1));
-  headers.delete('Cloudflare-CDN-Cache-Control');
-  return new Response(body.body, { status: 206, headers });
 }

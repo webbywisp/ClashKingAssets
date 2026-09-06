@@ -8,11 +8,7 @@
   // Existing public-assets bucket. No bucket is provisioned here.
   "r2_buckets": [{ "binding": "ASSETS", "bucket_name": "clashking-assets" }],
   "images": { "binding": "IMAGES" },
-  "cache": { "enabled": false, "cross_version_cache": false },
-  "exports": {
-    "default": { "type": "worker", "cache": { "enabled": false } },
-    "AssetOrigin": { "type": "worker", "cache": { "enabled": true } }
-  },
+  "cache": { "enabled": true, "cross_version_cache": false },
   "observability": { "enabled": true },
   "limits": { "cpu_ms": 100 },
   "routes": [{ "pattern": "assets.clashk.ing", "custom_domain": true }],
