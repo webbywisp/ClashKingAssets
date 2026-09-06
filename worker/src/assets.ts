@@ -1,3 +1,5 @@
+import { staticImageStream } from './static-image.ts';
+
 export const YEAR = 31_536_000;
 export const PURGE_PATH = '/__admin/purge';
 export const SIZES = new Set(['64', '128', '256', '512', '1024']);
@@ -97,7 +99,9 @@ export async function serveAsset(request: Request, env: AssetEnv): Promise<Respo
     return errorResponse(413, 'Image exceeds transformation limit');
   }
   try {
-    let image = env.IMAGES.input(source.body);
+    const staticBody = await staticImageStream(source.body);
+    if (!staticBody) return errorResponse(422, 'Animated image: request the original URL');
+    let image = env.IMAGES.input(staticBody);
     if (asset.size !== undefined) image = image.transform(transformOptions(asset.size));
     const output = await image.output({ format: 'image/avif', quality: 80 });
     const encoded = output.response();

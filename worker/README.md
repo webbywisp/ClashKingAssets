@@ -55,6 +55,11 @@ and streams bytes into the Images binding on a transformation miss. There is no
 KV image cache, legacy Cache API, public-origin fetch, saved R2 variant or generated
 AVIF committed to Git.
 
+Before transforming a raster, the Worker inspects up to 64 KiB of container
+headers and then streams the original bytes into Images. Animated WebP/APNG and
+AVIF sequences return an uncached 422 so the app uses the original animation.
+Unusually long unclassified headers also fall back instead of risking flattening.
+
 The canonical path includes the output extension and, for AVIF, the single size
 parameter. That gives at most six AVIF recipe keys per known stem. Requests do not
 forward cookies, Authorization, user-controlled version keys, method overrides,
