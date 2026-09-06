@@ -59,7 +59,6 @@ def test_only_stale_generated_language_files_are_removed(tmp_path):
 
 
 def test_release_publishes_manifest_after_referenced_files_and_deletes(monkeypatch):
-    monkeypatch.setattr(build, "file_sha", lambda path: "a" * 64)
     calls = []
 
     class Client:
@@ -94,7 +93,6 @@ def test_release_publishes_manifest_after_referenced_files_and_deletes(monkeypat
 
 
 def test_upload_failure_does_not_publish_manifest(monkeypatch):
-    monkeypatch.setattr(build, "file_sha", lambda path: "a" * 64)
     calls = []
 
     class Client:

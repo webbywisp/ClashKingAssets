@@ -216,13 +216,6 @@ manifest arrives during downloading, update `pendingSha`; completion of an older
 download must not clear that newer pending version. Notice processing runs even
 when the saved manifest is reused, so an interrupted update remains retryable.
 
-Release uploads attach the actual file SHA as R2 custom metadata `sha256`. The
-Worker returns it as `X-Asset-Source-Sha` for originals and transformed variants,
-and exposes the header through CORS. The app verifies it before committing a
-replacement. Objects uploaded before this metadata exists can still be verified
-by hashing their original bytes; generated AVIF responses without the header
-fall back to the original rather than being falsely marked current.
-
 For JSON, retain a cached-first/offline body and validators. Check on login/resume
 and at most once per minute while foregrounded, coalescing concurrent checks.
 Prefer If-None-Match conditional GET: retain the body on 304, atomically replace

@@ -65,15 +65,13 @@ function assetHeaders(object: R2Object, key: string, transformed: boolean, size?
   const ext = key.split('.').pop()?.toLowerCase() ?? '';
   headers.set('Content-Type', TYPES[ext] ?? headers.get('Content-Type') ?? 'application/octet-stream');
   headers.set('Last-Modified', object.uploaded.toUTCString());
-  const sourceSha = object.customMetadata?.sha256;
-  if (sourceSha && /^[a-f0-9]{64}$/.test(sourceSha)) headers.set('X-Asset-Source-Sha', sourceSha);
   // A weak validator identifies this recipe/source version without claiming byte identity.
   headers.set('ETag', transformed ? `W/"${object.etag}-avif-q80-v1-${size ?? 'full'}"` : object.httpEtag);
   headers.set('Cache-Control', 'public, max-age=0, must-revalidate');
   // Mutable game metadata must refresh without any release-triggered purge.
   headers.set('Cloudflare-CDN-Cache-Control', `public, max-age=${ext === 'json' ? 60 : YEAR}`);
   headers.set('Access-Control-Allow-Origin', '*');
-  headers.set('Access-Control-Expose-Headers', 'ETag, Last-Modified, Content-Length, Content-Range, Accept-Ranges, X-Asset-Source-Sha');
+  headers.set('Access-Control-Expose-Headers', 'ETag, Last-Modified, Content-Length, Content-Range, Accept-Ranges');
   headers.set('X-Content-Type-Options', 'nosniff');
   // Never inherit a stale encoding or Vary from source object metadata for a conversion.
   if (transformed) {

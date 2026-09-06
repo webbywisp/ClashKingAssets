@@ -37,11 +37,6 @@ class FakeR2Client:
         return {}
 
 
-@pytest.fixture(autouse=True)
-def fake_upload_hash(monkeypatch):
-    monkeypatch.setattr(build, "file_sha", lambda path: "a" * 64)
-
-
 def make_scattachment(path: str, payload: bytes, *, offset: int = 32) -> bytes:
     encoded_path = path.encode()
     padding = bytes(offset - 12 - len(encoded_path))
@@ -120,8 +115,6 @@ def test_apply_sync_plan_sets_cache_and_content_type_for_shared_cdn_assets():
         build.apply_sync_plan(plan, config, workers=2)
 
     uploaded = {key: extra_args for _, _, key, extra_args in client.uploaded}
-    for extra_args in uploaded.values():
-        assert extra_args.pop("Metadata") == {"sha256": "a" * 64}
     assert uploaded["achievements/war-champion-achievement-badge.glb"] == {
         "ContentType": "model/gltf-binary",
         "CacheControl": build.CDN_CACHE_CONTROL,

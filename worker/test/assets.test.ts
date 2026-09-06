@@ -30,7 +30,6 @@ function fixture(files: Record<string, string>) {
   const object = (key: string, data: string) => ({
     key, size: new TextEncoder().encode(data).length, etag: 'abc', httpEtag: '"abc"',
     uploaded: new Date('2026-09-01T12:00:00.567Z'),
-    customMetadata: { sha256: 'a'.repeat(64) },
     writeHttpMetadata(headers: Headers) { headers.set('Content-Type', 'application/octet-stream'); },
     body: new Response(data).body!,
   });
@@ -97,8 +96,6 @@ test('AVIF maps to private bucket source, uses square scale-down bounds and a fi
     assert.deepEqual(calls.transform, [{ width: Number(size), height: Number(size), fit: 'scale-down' }]);
     assert.deepEqual(calls.output, [{ format: 'image/avif', quality: 80 }]);
     assert.equal(response.headers.get('Content-Type'), 'image/avif');
-    assert.equal(response.headers.get('X-Asset-Source-Sha'), 'a'.repeat(64));
-    assert.match(response.headers.get('Access-Control-Expose-Headers')!, /X-Asset-Source-Sha/);
     assert.equal(response.headers.get('Cache-Control'), 'public, max-age=0, must-revalidate');
   }
   assert.deepEqual(transformOptions(), {});

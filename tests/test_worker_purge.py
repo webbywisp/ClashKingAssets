@@ -149,7 +149,6 @@ def test_source_collision_validation_and_real_layout(tmp_path):
 
 
 def test_partial_r2_upload_does_not_start_deletes(monkeypatch):
-    monkeypatch.setattr(build, 'file_sha', lambda path: 'a' * 64)
     client = Mock()
     client.upload_file.side_effect = RuntimeError('upload failed')
     monkeypatch.setattr(build, 'create_r2_client', lambda config: client)

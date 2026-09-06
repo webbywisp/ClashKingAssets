@@ -13,7 +13,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from check_image_sources import check_image_sources
-from generate_manifest import ManifestError, check_manifest, file_sha
+from generate_manifest import ManifestError, check_manifest
 from worker_purge import WorkerPurgeError, load_worker_purge_config, purge_worker_cache
 
 load_dotenv()
@@ -320,7 +320,6 @@ def apply_sync_plan(plan: dict[str, Any], config: R2Config, workers: int, before
 
     def upload_file(upload: dict[str, str]) -> None:
         extra_args = upload_extra_args(upload["key"]) or {}
-        extra_args["Metadata"] = {"sha256": file_sha(Path(upload["local_path"]))}
         client.upload_file(upload["local_path"], config.bucket, upload["key"], ExtraArgs=extra_args)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
