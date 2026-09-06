@@ -14,6 +14,7 @@ def check_image_sources(root: Path) -> dict[str, int]:
     if not root.is_dir():
         raise ValueError('assets directory is missing')
     sources: dict[str, list[str]] = defaultdict(list)
+    real_avif_stems: set[str] = set()
     real_avif = 0
     for path in root.rglob('*'):
         if not path.is_file():
@@ -25,7 +26,12 @@ def check_image_sources(root: Path) -> dict[str, int]:
             sources[key.rsplit('.', 1)[0]].append(key)
         if path.suffix == '.avif':
             real_avif += 1
-    collisions = [sorted(paths) for paths in sources.values() if len(paths) > 1]
+            real_avif_stems.add(key.rsplit('.', 1)[0])
+    collisions = [
+        sorted(paths)
+        for stem, paths in sources.items()
+        if len(paths) > 1 and stem not in real_avif_stems
+    ]
     if collisions:
         raise ValueError(f'ambiguous AVIF sources: {collisions}')
     return {'image_sources': len(sources), 'real_avif_objects': real_avif, 'collisions': 0}

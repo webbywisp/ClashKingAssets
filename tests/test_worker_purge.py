@@ -141,6 +141,8 @@ def test_source_collision_validation_and_real_layout(tmp_path):
     (tmp_path / 'a.avif').touch()
     assert check_image_sources(tmp_path) == {'image_sources': 1, 'real_avif_objects': 1, 'collisions': 0}
     (tmp_path / 'a.png').touch()
+    assert check_image_sources(tmp_path) == {'image_sources': 1, 'real_avif_objects': 1, 'collisions': 0}
+    (tmp_path / 'a.avif').unlink()
     with pytest.raises(ValueError, match='ambiguous AVIF sources'):
         check_image_sources(tmp_path)
     assert check_image_sources(Path(__file__).resolve().parents[1] / 'assets')['collisions'] == 0
