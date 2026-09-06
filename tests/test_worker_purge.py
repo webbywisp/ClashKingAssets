@@ -60,6 +60,7 @@ def test_purge_posts_secret_only_to_fixed_operation_and_does_two_passes(monkeypa
         assert request.method == 'POST'
         assert json.loads(request.data) == {'tags': [worker_purge.asset_cache_tag('a.webp')]}
         assert request.headers['Authorization'] == 'Bearer ' + 'x' * 32
+        assert request.headers['User-agent'] == worker_purge.USER_AGENT
         assert timeout == 30
         events.append('purge')
         return response({'success': True, 'scope': 'AssetOrigin'})

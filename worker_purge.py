@@ -18,6 +18,9 @@ class WorkerPurgeError(RuntimeError):
     pass
 
 
+USER_AGENT = 'ClashKingAssetsRelease/1.0 (+https://github.com/ClashKingInc/ClashKingAssets)'
+
+
 @dataclass(frozen=True)
 class WorkerPurgeConfig:
     url: str
@@ -75,6 +78,7 @@ def purge_once(config: WorkerPurgeConfig, tags: list[str]) -> None:
             'Authorization': f'Bearer {config.token}',
             'Accept': 'application/json',
             'Content-Type': 'application/json',
+            'User-Agent': USER_AGENT,
         },
     )
     opener = urllib.request.build_opener(NoRedirect())
