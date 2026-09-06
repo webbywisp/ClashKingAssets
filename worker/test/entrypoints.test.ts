@@ -29,7 +29,7 @@ test('gateway normalizes requests, strips incoming headers, and handles conditio
       } });
     },
   } } }, {});
-  const result = await gateway.fetch(new Request('https://assets.clashk.ing/static_data.json?v=123', { headers: {
+  const result = await gateway.fetch(new Request('https://assets.clashk.ing/static_data.json?ignored=123', { headers: {
     'If-None-Match': '"new"', 'Authorization': 'Bearer random', 'Cookie': 'x=1',
     'Cloudflare-Workers-Version-Key': 'unlimited', 'X-Forwarded-Host': 'random', 'Cache-Control': 'no-cache',
   } }));
@@ -54,9 +54,10 @@ test('purge RPC uses AssetOrigin context, never the gateway cache or a zone API'
   }, { PURGE_TOKEN: 'x'.repeat(32), PURGE_ENABLED: 'true' });
   const result = await gateway.fetch(new Request('https://assets.clashk.ing/__admin/purge', {
     method: 'POST', headers: { Authorization: `Bearer ${'x'.repeat(32)}` },
+    body: JSON.stringify({ tags: ['asset-' + 'a'.repeat(64)] }),
   }));
   assert.equal(result.status, 200);
-  assert.deepEqual(calls, [{ purgeEverything: true }]);
+  assert.deepEqual(calls, [{ tags: ['asset-' + 'a'.repeat(64)] }]);
 });
 
 test('CORS preflight and unsupported methods never reach the image/cache entrypoint', async () => {

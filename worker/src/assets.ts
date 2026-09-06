@@ -15,7 +15,7 @@ export function errorResponse(status: number, message: string): Response {
 }
 
 // Decode once and re-encode each segment: equivalent URL spellings share one key.
-// Query parameters other than size retain legacy passthrough behavior but are discarded.
+// Only supported sizes partition the cache; releases invalidate changed files.
 export function parseAssetRequest(url: URL): AssetRequest {
   const segments = url.pathname.slice(1).split('/').map(decodeURIComponent);
   if (segments.some(s => !s || s === '.' || s === '..' || /[\\/\x00-\x1f\x7f]/.test(s)) ||
@@ -27,8 +27,10 @@ export function parseAssetRequest(url: URL): AssetRequest {
   }
   // Original paths always return originals, even when a legacy query is present.
   const size = key.endsWith('.avif') && sizes.length ? Number(sizes[0]) : undefined;
+  const query = new URLSearchParams();
+  if (size !== undefined) query.set('size', String(size));
   return { key, size, path: '/' + segments.map(encodeURIComponent).join('/') +
-    (size === undefined ? '' : `?size=${size}`) };
+    (query.size ? `?${query}` : '') };
 }
 
 export function canonicalRequest(asset: AssetRequest): Request {
@@ -39,6 +41,14 @@ export function canonicalRequest(asset: AssetRequest): Request {
 
 export function transformOptions(size?: number): ImageTransform {
   return size === undefined ? {} : { width: size, height: size, fit: 'scale-down' };
+}
+
+export async function assetCacheTag(key: string): Promise<string> {
+  // A raster source, its generated AVIF, and every size share one family tag.
+  const family = /\.(webp|png|jpe?g|avif)$/i.test(key)
+    ? 'image:' + key.replace(/\.(webp|png|jpe?g|avif)$/i, '') : 'file:' + key;
+  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(family)));
+  return 'asset-' + [...hash].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 const TYPES: Record<string, string> = {
@@ -55,14 +65,15 @@ function assetHeaders(object: R2Object, key: string, transformed: boolean, size?
   const ext = key.split('.').pop()?.toLowerCase() ?? '';
   headers.set('Content-Type', TYPES[ext] ?? headers.get('Content-Type') ?? 'application/octet-stream');
   headers.set('Last-Modified', object.uploaded.toUTCString());
+  const sourceSha = object.customMetadata?.sha256;
+  if (sourceSha && /^[a-f0-9]{64}$/.test(sourceSha)) headers.set('X-Asset-Source-Sha', sourceSha);
   // A weak validator identifies this recipe/source version without claiming byte identity.
   headers.set('ETag', transformed ? `W/"${object.etag}-avif-q80-v1-${size ?? 'full'}"` : object.httpEtag);
-  headers.set('Cache-Control', headers.get('Content-Type')!.startsWith('image/') ?
-    `public, max-age=${YEAR}, immutable` : 'public, max-age=0, must-revalidate');
+  headers.set('Cache-Control', 'public, max-age=0, must-revalidate');
   // Mutable game metadata must refresh without any release-triggered purge.
   headers.set('Cloudflare-CDN-Cache-Control', `public, max-age=${ext === 'json' ? 60 : YEAR}`);
   headers.set('Access-Control-Allow-Origin', '*');
-  headers.set('Access-Control-Expose-Headers', 'ETag, Last-Modified, Content-Length, Content-Range, Accept-Ranges');
+  headers.set('Access-Control-Expose-Headers', 'ETag, Last-Modified, Content-Length, Content-Range, Accept-Ranges, X-Asset-Source-Sha');
   headers.set('X-Content-Type-Options', 'nosniff');
   // Never inherit a stale encoding or Vary from source object metadata for a conversion.
   if (transformed) {
@@ -94,6 +105,7 @@ export async function serveAsset(request: Request, env: AssetEnv): Promise<Respo
   }
   if (!source) return errorResponse(404, 'Asset not found');
   const headers = assetHeaders(source, asset.key, transformed, asset.size);
+  headers.set('Cache-Tag', await assetCacheTag(asset.key));
   if (!transformed) return new Response(source.body, { headers });
   if (source.size > 20 * 1024 * 1024) {
     await source.body.cancel();
@@ -148,7 +160,7 @@ export async function clientResponse(request: Request, response: Response): Prom
 export interface PurgeResult { success: boolean }
 export async function purgeRequest(
   request: Request, secret: string | undefined, enabled: string | undefined,
-  purge: () => Promise<PurgeResult>,
+  purge: (tags: string[]) => Promise<PurgeResult>,
 ): Promise<Response> {
   if (request.method !== 'POST') return errorResponse(405, 'POST required');
   if (enabled !== 'true' || !secret || secret.length < 32) return errorResponse(503, 'Purge is not configured');
@@ -159,9 +171,33 @@ export async function purgeRequest(
   let difference = 0;
   for (let i = 0; i < expectedHash.length; i++) difference |= expectedHash[i] ^ actualHash[i];
   if (difference !== 0) return errorResponse(401, 'Unauthorized');
-  if (new URL(request.url).search || request.body !== null) return errorResponse(400, 'No query or body allowed');
+  if (new URL(request.url).search || request.body === null) return errorResponse(400, 'A tags body is required');
+  let tags: string[];
   try {
-    const result = await purge();
+    const reader = request.body.getReader();
+    const parts: Uint8Array[] = [];
+    let length = 0;
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        length += value.byteLength;
+        if (length > 8000) { await reader.cancel(); return errorResponse(413, 'Purge request too large'); }
+        parts.push(value);
+      }
+    } finally { reader.releaseLock(); }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const part of parts) { bytes.set(part, offset); offset += part.length; }
+    const body = JSON.parse(new TextDecoder().decode(bytes));
+    if (!body || Object.keys(body).length !== 1 || !Array.isArray(body.tags) ||
+        body.tags.length === 0 || body.tags.length > 100 ||
+        body.tags.some((tag: unknown) => typeof tag !== 'string' || !/^asset-[a-f0-9]{64}$/.test(tag)))
+      return errorResponse(400, 'Expected 1–100 asset tags');
+    tags = [...new Set<string>(body.tags)];
+  } catch { return errorResponse(400, 'Invalid purge body'); }
+  try {
+    const result = await purge(tags);
     if (!result.success) return errorResponse(502, 'Worker cache purge rejected; retry after backoff');
     return new Response(JSON.stringify({ success: true, scope: 'AssetOrigin' }), { headers: {
       'Content-Type': 'application/json', 'Cache-Control': 'no-store',

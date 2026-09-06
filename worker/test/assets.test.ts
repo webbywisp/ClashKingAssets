@@ -3,14 +3,34 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import {
   canonicalRequest, clientResponse, notModified, originalRange, parseAssetRequest,
-  purgeRequest, serveAsset, SIZES, transformOptions, YEAR,
+  purgeRequest, serveAsset, SIZES, transformOptions, YEAR, assetCacheTag,
 } from '../src/assets.ts';
+
+test('version queries no longer partition the cache', () => {
+  const sha = 'a'.repeat(64);
+  for (const path of ['item.webp', 'item.avif?size=256']) {
+    const separator = path.includes('?') ? '&' : '?';
+    const asset = parseAssetRequest(new URL(`https://assets.clashk.ing/${path}${separator}v=${sha}`));
+    assert.equal(canonicalRequest(asset).url, `https://assets.internal/${path}`);
+  }
+  assert.equal(parseAssetRequest(new URL('https://assets.clashk.ing/item.webp?v=random')).path, '/item.webp');
+});
+
+test('all image sizes and originals share only their family cache tag', async () => {
+  const { env } = fixture({ 'icons/a.webp': 'image' });
+  const original = await serveAsset(req('/icons/a.webp'), env);
+  const sized = await serveAsset(req('/icons/a.avif?size=256'), env);
+  assert.equal(original.headers.get('Cache-Tag'), sized.headers.get('Cache-Tag'));
+  assert.equal(original.headers.get('Cache-Tag'), await assetCacheTag('icons/a.png'));
+  assert.notEqual(await assetCacheTag('icons/a.webp'), await assetCacheTag('icons/A.webp'));
+});
 
 function fixture(files: Record<string, string>) {
   const calls = { get: [] as string[], head: [] as string[], transform: [] as unknown[], output: [] as unknown[] };
   const object = (key: string, data: string) => ({
     key, size: new TextEncoder().encode(data).length, etag: 'abc', httpEtag: '"abc"',
     uploaded: new Date('2026-09-01T12:00:00.567Z'),
+    customMetadata: { sha256: 'a'.repeat(64) },
     writeHttpMetadata(headers: Headers) { headers.set('Content-Type', 'application/octet-stream'); },
     body: new Response(data).body!,
   });
@@ -50,7 +70,7 @@ test('canonical keys distinguish every size and format and discard arbitrary cac
       keys.add(inner.url);
       assert.equal(inner.method, 'GET');
       assert.equal([...inner.headers].length, 0);
-      const dirty = parseAssetRequest(new URL(req(path + (size ? '&' : '?') + 'url=https://evil.test/x&quality=1&v=random').url));
+      const dirty = parseAssetRequest(new URL(req(path + (size ? '&' : '?') + 'url=https://evil.test/x&quality=1').url));
       assert.equal(canonicalRequest(dirty).url, inner.url);
     }
   }
@@ -77,7 +97,9 @@ test('AVIF maps to private bucket source, uses square scale-down bounds and a fi
     assert.deepEqual(calls.transform, [{ width: Number(size), height: Number(size), fit: 'scale-down' }]);
     assert.deepEqual(calls.output, [{ format: 'image/avif', quality: 80 }]);
     assert.equal(response.headers.get('Content-Type'), 'image/avif');
-    assert.equal(response.headers.get('Cache-Control'), `public, max-age=${YEAR}, immutable`);
+    assert.equal(response.headers.get('X-Asset-Source-Sha'), 'a'.repeat(64));
+    assert.match(response.headers.get('Access-Control-Expose-Headers')!, /X-Asset-Source-Sha/);
+    assert.equal(response.headers.get('Cache-Control'), 'public, max-age=0, must-revalidate');
   }
   assert.deepEqual(transformOptions(), {});
   const { env, calls } = fixture({ 'a.png': 'png' });
@@ -157,11 +179,11 @@ test('original byte ranges support audio and do not fragment the inner cache', a
   assert.equal(await originalRange(req('/music.ogg', { headers: { Range: 'bytes=0-1', 'If-Range': '"old"' } }), asset, env), null);
 });
 
-test('purge requires POST, configured strong secret, auth, empty body and exact scope', async () => {
+test('purge requires POST, configured strong secret, auth, bounded tags and exact scope', async () => {
   let count = 0;
   const purge = async () => { count++; return { success: true }; };
   const secret = 'a'.repeat(32);
-  const authorized = { method: 'POST', headers: { Authorization: `Bearer ${secret}` } };
+  const authorized = { method: 'POST', headers: { Authorization: `Bearer ${secret}` }, body: JSON.stringify({ tags: ['asset-' + 'a'.repeat(64)] }) };
   const call = (request: Request, token = secret, enabled = 'true') => purgeRequest(request, token, enabled, purge);
   assert.equal((await call(req('/__admin/purge'))).status, 405);
   assert.equal((await call(req('/__admin/purge', { method: 'POST' }))).status, 401);
@@ -169,6 +191,8 @@ test('purge requires POST, configured strong secret, auth, empty body and exact 
   assert.equal((await call(req('/__admin/purge', authorized), 'short')).status, 503);
   assert.equal((await call(req('/__admin/purge?scope=other', authorized))).status, 400);
   assert.equal((await call(req('/__admin/purge', { ...authorized, body: '{}' }))).status, 400);
+  assert.equal((await call(req('/__admin/purge', { ...authorized, body: JSON.stringify({ purgeEverything: true }) }))).status, 400);
+  assert.equal((await call(req('/__admin/purge', { ...authorized, body: 'x'.repeat(8001) }))).status, 413);
   assert.equal(count, 0);
   const response = await call(req('/__admin/purge', authorized));
   assert.deepEqual(await response.json(), { success: true, scope: 'AssetOrigin' });

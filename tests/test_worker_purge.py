@@ -58,7 +58,7 @@ def test_purge_posts_secret_only_to_fixed_operation_and_does_two_passes(monkeypa
     def open_request(request, timeout):
         assert request.full_url == 'https://assets.clashk.ing/__admin/purge'
         assert request.method == 'POST'
-        assert request.data is None
+        assert json.loads(request.data) == {'tags': [worker_purge.asset_cache_tag('a.webp')]}
         assert request.headers['Authorization'] == 'Bearer ' + 'x' * 32
         assert timeout == 30
         events.append('purge')
@@ -67,7 +67,9 @@ def test_purge_posts_secret_only_to_fixed_operation_and_does_two_passes(monkeypa
     opener.open.side_effect = open_request
     monkeypatch.setattr(worker_purge.urllib.request, 'build_opener', lambda handler: opener)
     monkeypatch.setattr(worker_purge.time, 'sleep', lambda delay: events.append(delay))
-    worker_purge.purge_worker_cache(worker_purge.WorkerPurgeConfig('https://assets.clashk.ing/__admin/purge', 'x' * 32))
+    worker_purge.purge_worker_cache(
+        worker_purge.WorkerPurgeConfig('https://assets.clashk.ing/__admin/purge', 'x' * 32), ['a.webp']
+    )
     assert events == ['purge', 60, 'purge']
     assert worker_purge.NoRedirect().redirect_request(None, None, 302, '', {}, 'https://evil.test') is None
 
@@ -79,7 +81,10 @@ def test_purge_checks_scope_retries_and_sanitizes_failure(monkeypatch):
     sleep = Mock()
     monkeypatch.setattr(worker_purge.time, 'sleep', sleep)
     with pytest.raises(worker_purge.WorkerPurgeError, match='python worker_purge.py') as error:
-        worker_purge.purge_once(worker_purge.WorkerPurgeConfig('https://example.test/__admin/purge', 'SECRET'))
+        worker_purge.purge_once(
+            worker_purge.WorkerPurgeConfig('https://example.test/__admin/purge', 'SECRET'),
+            [worker_purge.asset_cache_tag('a.webp')],
+        )
     assert 'SECRET' not in str(error.value)
     assert opener.open.call_count == 3
     assert [call.args[0] for call in sleep.call_args_list] == [5, 10]
@@ -90,18 +95,45 @@ def test_purge_auth_failure_does_not_retry(monkeypatch):
     opener.open.side_effect = urllib.error.HTTPError('https://example.test', 401, 'secret detail', {}, None)
     monkeypatch.setattr(worker_purge.urllib.request, 'build_opener', lambda handler: opener)
     with pytest.raises(worker_purge.WorkerPurgeError, match='HTTP 401'):
-        worker_purge.purge_once(worker_purge.WorkerPurgeConfig('https://example.test/__admin/purge', 'secret'))
+        worker_purge.purge_once(
+            worker_purge.WorkerPurgeConfig('https://example.test/__admin/purge', 'secret'),
+            [worker_purge.asset_cache_tag('a.webp')],
+        )
     assert opener.open.call_count == 1
 
 
-def test_releases_never_use_purge_configuration():
-    root = Path(__file__).parent
+def test_releases_require_selective_purge_configuration():
+    root = Path(__file__).resolve().parents[1]
     workflow = (root / '.github/workflows/release-assets.yml').read_text()
     source = (root / 'build.py').read_text()
-    assert 'ASSETS_WORKER_PURGE' not in workflow
-    assert 'worker_purge' not in source
-    assert 'purge_worker_cache' not in source
+    assert "ASSETS_WORKER_PURGE_REQUIRED: 'true'" in workflow
+    assert 'purge_worker_cache' in source
+    assert 'before_manifest=' in source
     assert workflow.count('\nconcurrency:') == 1
+
+
+def test_image_family_tags_cover_aliases_but_not_unrelated_files():
+    tag = worker_purge.asset_cache_tag('icons/a.webp')
+    assert tag == worker_purge.asset_cache_tag('icons/a.avif')
+    assert tag == worker_purge.asset_cache_tag('icons/a.png')
+    assert tag != worker_purge.asset_cache_tag('icons/b.webp')
+    assert tag != worker_purge.asset_cache_tag('icons/A.webp')
+    assert tag != worker_purge.asset_cache_tag('icons/a.json')
+
+
+def test_purge_batches_only_requested_families_and_skips_empty_work(monkeypatch):
+    purge = Mock()
+    monkeypatch.setattr(worker_purge, 'purge_once', purge)
+    monkeypatch.setattr(worker_purge.time, 'sleep', Mock())
+    config = worker_purge.WorkerPurgeConfig('https://example.test/__admin/purge', 'x' * 32)
+    worker_purge.purge_worker_cache(config, [])
+    purge.assert_not_called()
+    keys = [f'icons/{n}.webp' for n in range(101)]
+    worker_purge.purge_worker_cache(config, keys)
+    assert [len(call.args[1]) for call in purge.call_args_list] == [100, 1, 100, 1]
+    assert set(purge.call_args_list[0].args[1] + purge.call_args_list[1].args[1]) == {
+        worker_purge.asset_cache_tag(key) for key in keys
+    }
 
 
 def test_source_collision_validation_and_real_layout(tmp_path):
@@ -111,10 +143,11 @@ def test_source_collision_validation_and_real_layout(tmp_path):
     (tmp_path / 'a.png').touch()
     with pytest.raises(ValueError, match='ambiguous AVIF sources'):
         check_image_sources(tmp_path)
-    assert check_image_sources(Path(__file__).parent / 'assets')['collisions'] == 0
+    assert check_image_sources(Path(__file__).resolve().parents[1] / 'assets')['collisions'] == 0
 
 
 def test_partial_r2_upload_does_not_start_deletes(monkeypatch):
+    monkeypatch.setattr(build, 'file_sha', lambda path: 'a' * 64)
     client = Mock()
     client.upload_file.side_effect = RuntimeError('upload failed')
     monkeypatch.setattr(build, 'create_r2_client', lambda config: client)

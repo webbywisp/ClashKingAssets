@@ -13,7 +13,8 @@ from typing import Any
 from dotenv import load_dotenv
 
 from check_image_sources import check_image_sources
-from generate_manifest import ManifestError, check_manifest
+from generate_manifest import ManifestError, check_manifest, file_sha
+from worker_purge import WorkerPurgeError, load_worker_purge_config, purge_worker_cache
 
 load_dotenv()
 
@@ -65,10 +66,7 @@ def upload_extra_args(key: str) -> dict[str, str] | None:
     content_type = CDN_CONTENT_TYPES.get(Path(key).suffix.casefold())
     if content_type is None:
         return None
-    return {
-        "ContentType": content_type,
-        "CacheControl": CDN_CACHE_CONTROL,
-    }
+    return {"ContentType": content_type, "CacheControl": CDN_CACHE_CONTROL}
 
 
 def parse_args() -> argparse.Namespace:
@@ -83,12 +81,7 @@ def parse_args() -> argparse.Namespace:
 
 def run_git(args: list[str]) -> str:
     try:
-        completed = subprocess.run(
-            ["git", *args],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        completed = subprocess.run(["git", *args], check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
         stderr = exc.stderr.strip()
         detail = f": {stderr}" if stderr else ""
@@ -255,9 +248,7 @@ def build_sync_plan(entries: list[DiffEntry], assets_root: str) -> dict[str, Any
                     continue
                 uploads.append(
                     UploadOperation(
-                        local_path=local_path.as_posix(),
-                        key=key_for_path(new_path, assets_root),
-                        reason="renamed",
+                        local_path=local_path.as_posix(), key=key_for_path(new_path, assets_root), reason="renamed"
                     )
                 )
             counts["renamed"] += 1
@@ -275,9 +266,7 @@ def build_sync_plan(entries: list[DiffEntry], assets_root: str) -> dict[str, Any
                 continue
             uploads.append(
                 UploadOperation(
-                    local_path=local_path.as_posix(),
-                    key=key_for_path(new_path, assets_root),
-                    reason="copied",
+                    local_path=local_path.as_posix(), key=key_for_path(new_path, assets_root), reason="copied"
                 )
             )
             counts["added"] += 1
@@ -324,25 +313,20 @@ def create_r2_client(config: R2Config):
     )
 
 
-def apply_sync_plan(plan: dict[str, Any], config: R2Config, workers: int) -> None:
+def apply_sync_plan(plan: dict[str, Any], config: R2Config, workers: int, before_manifest=None) -> None:
     if workers < 1:
         raise BuildError("workers must be at least 1")
     client = create_r2_client(config)
 
     def upload_file(upload: dict[str, str]) -> None:
-        extra_args = upload_extra_args(upload["key"])
-        if extra_args is None:
-            client.upload_file(upload["local_path"], config.bucket, upload["key"])
-            return
-        client.upload_file(
-            upload["local_path"],
-            config.bucket,
-            upload["key"],
-            ExtraArgs=extra_args,
-        )
+        extra_args = upload_extra_args(upload["key"]) or {}
+        extra_args["Metadata"] = {"sha256": file_sha(Path(upload["local_path"]))}
+        client.upload_file(upload["local_path"], config.bucket, upload["key"], ExtraArgs=extra_args)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = [executor.submit(upload_file, upload) for upload in plan["uploads"]]
+        futures = [
+            executor.submit(upload_file, upload) for upload in plan["uploads"] if upload["key"] != "manifest.json"
+        ]
         for future in concurrent.futures.as_completed(futures):
             future.result()
 
@@ -350,13 +334,19 @@ def apply_sync_plan(plan: dict[str, Any], config: R2Config, workers: int) -> Non
     for offset in range(0, len(deletions), 1000):
         batch = deletions[offset : offset + 1000]
         response = client.delete_objects(
-            Bucket=config.bucket,
-            Delete={"Objects": [{"Key": deletion["key"]} for deletion in batch], "Quiet": True},
+            Bucket=config.bucket, Delete={"Objects": [{"Key": deletion["key"]} for deletion in batch], "Quiet": True}
         )
         errors = response.get("Errors", [])
         if errors:
             details = ", ".join(f"{error.get('Key')}: {error.get('Message')}" for error in errors)
             raise BuildError(f"R2 delete failed: {details}")
+
+    # Announce the new hashes only once all referenced uploads/deletions succeed.
+    if before_manifest is not None:
+        before_manifest()
+    for upload in plan["uploads"]:
+        if upload["key"] == "manifest.json":
+            upload_file(upload)
 
 
 def build_summary(
@@ -399,7 +389,7 @@ def main() -> int:
 
     plan = build_sync_plan(entries, assets_root)
     try:
-        check_image_sources(Path(assets_root))
+        source_summary = check_image_sources(Path(assets_root))
     except ValueError as exc:
         raise BuildError(str(exc)) from exc
 
@@ -412,9 +402,30 @@ def main() -> int:
         first_release=first_release,
     )
 
+    summary['image_sources'] = source_summary
+
     if not args.dry_run:
+        try:
+            purge_config = load_worker_purge_config()
+            if purge_config is None:
+                raise WorkerPurgeError('Selective Worker purge must be configured before publishing assets')
+        except WorkerPurgeError as exc:
+            raise BuildError(str(exc)) from exc
         config = load_r2_config()
-        apply_sync_plan(plan, config, args.workers)
+        changed_keys = sorted(
+            {item['key'] for item in plan['uploads'] + plan['deletes'] if item['key'] != 'manifest.json'}
+        )
+        try:
+            apply_sync_plan(
+                plan, config, args.workers, before_manifest=lambda: purge_worker_cache(purge_config, changed_keys)
+            )
+            if any(item['key'] == 'manifest.json' for item in plan['uploads']):
+                purge_worker_cache(purge_config, ['manifest.json'])
+        except Exception as exc:
+            raise BuildError(
+                'R2 sync or selective cache clearing failed. Some objects may have changed. '
+                'Repair the upload failure and rerun this exact release.'
+            ) from exc
 
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0

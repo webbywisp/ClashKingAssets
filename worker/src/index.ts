@@ -10,15 +10,15 @@ interface GatewayEnv extends Omit<Cloudflare.Env, 'PURGE_ENABLED'> {
 }
 
 // All cacheable responses belong to this entrypoint. RPC runs with its context,
-// so purgeEverything clears the correct cache, including original and AVIF paths.
+// so tag purges clear this cache, including original and AVIF paths.
 export class AssetOrigin extends WorkerEntrypoint<GatewayEnv> {
   async fetch(request: Request): Promise<Response> {
     try { return await serveAsset(request, this.env); }
     catch { return errorResponse(502, 'Asset read failed'); }
   }
-  async purgeAll() {
+  async purgeTags(tags: string[]) {
     if (!this.ctx.cache) throw new Error('Workers Cache API is unavailable');
-    return this.ctx.cache.purge({ purgeEverything: true });
+    return this.ctx.cache.purge({ tags });
   }
 }
 
@@ -28,7 +28,7 @@ export default class AssetsGateway extends WorkerEntrypoint<GatewayEnv> {
       const url = new URL(request.url);
       if (url.pathname === PURGE_PATH) {
         return purgeRequest(request, this.env.PURGE_TOKEN, this.env.PURGE_ENABLED,
-          () => this.ctx.exports.AssetOrigin.purgeAll());
+          (tags) => this.ctx.exports.AssetOrigin.purgeTags(tags));
       }
       if (request.method === 'OPTIONS') {
         return new Response(null, { status: 204, headers: {

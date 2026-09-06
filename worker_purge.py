@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -52,9 +55,27 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def purge_once(config: WorkerPurgeConfig) -> None:
+def asset_cache_tag(key: str) -> str:
+    family = (
+        'image:' + re.sub(r'\.(webp|png|jpe?g|avif)$', '', key, flags=re.I)
+        if re.search(r'\.(webp|png|jpe?g|avif)$', key, re.I)
+        else 'file:' + key
+    )
+    return 'asset-' + hashlib.sha256(family.encode('utf-8')).hexdigest()
+
+
+def purge_once(config: WorkerPurgeConfig, tags: list[str]) -> None:
+    if not tags or len(tags) > 100 or any(not re.fullmatch(r'asset-[a-f0-9]{64}', tag) for tag in tags):
+        raise WorkerPurgeError('Expected 1–100 asset tags')
     request = urllib.request.Request(
-        config.url, method='POST', headers={'Authorization': f'Bearer {config.token}', 'Accept': 'application/json'}
+        config.url,
+        method='POST',
+        data=json.dumps({'tags': tags}).encode('utf-8'),
+        headers={
+            'Authorization': f'Bearer {config.token}',
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+        },
     )
     opener = urllib.request.build_opener(NoRedirect())
     for attempt in range(3):
@@ -81,24 +102,32 @@ def purge_once(config: WorkerPurgeConfig) -> None:
     raise WorkerPurgeError(
         'Uploads completed but Assets Worker purge failed after 3 attempts. '
         'Cached content may be stale. Fix configuration/service availability, then run python worker_purge.py '
-        'with the same CI secrets; do not roll back or republish assets merely to retry the purge.'
+        'with --keys followed by the affected R2 keys and the same CI secrets, or rerun the same release.'
     )
 
 
-def purge_worker_cache(config: WorkerPurgeConfig) -> None:
-    purge_once(config)
+def purge_worker_cache(config: WorkerPurgeConfig, keys: list[str]) -> None:
+    tags = sorted({asset_cache_tag(key) for key in keys})
+    if not tags:
+        return
+    for offset in range(0, len(tags), 100):
+        purge_once(config, tags[offset : offset + 100])
     # Mitigates fills already running at the first purge. It is not a documented
     # atomic release barrier; the migration checklist requires a live race probe.
     time.sleep(60)
-    purge_once(config)
+    for offset in range(0, len(tags), 100):
+        purge_once(config, tags[offset : offset + 100])
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Purge only the specified asset keys and their image variants')
+    parser.add_argument('--keys', nargs='+', required=True)
+    args = parser.parse_args()
     try:
         config = load_worker_purge_config()
         if config is None:
             raise WorkerPurgeError('Assets Worker purge is not configured')
-        purge_worker_cache(config)
+        purge_worker_cache(config, args.keys)
         print(json.dumps({'success': True, 'scope': 'AssetOrigin', 'passes': 2}))
     except WorkerPurgeError as exc:
         raise SystemExit(str(exc)) from None

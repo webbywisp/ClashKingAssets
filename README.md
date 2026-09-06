@@ -18,10 +18,10 @@ Asset responses include a `Last-Modified` header. You can make a `HEAD` request 
 
 ## Assets delivery Worker
 
-The private-R2 image Worker, AVIF URL contract, optional manual cache clearing,
-configuration, app requirements and migration checklist are in
+The private-R2 image Worker, AVIF request contract, selective release cache clearing,
+configuration, app requirements, and migration checklist are documented in
 [worker/README.md](worker/README.md). The existing bucket is `clashking-assets`.
-No deployment or automatic release cache clearing is included.
+
 
 ## Programmatic Paths
 

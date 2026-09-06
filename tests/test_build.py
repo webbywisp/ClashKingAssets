@@ -37,6 +37,11 @@ class FakeR2Client:
         return {}
 
 
+@pytest.fixture(autouse=True)
+def fake_upload_hash(monkeypatch):
+    monkeypatch.setattr(build, "file_sha", lambda path: "a" * 64)
+
+
 def make_scattachment(path: str, payload: bytes, *, offset: int = 32) -> bytes:
     encoded_path = path.encode()
     padding = bytes(offset - 12 - len(encoded_path))
@@ -46,9 +51,7 @@ def make_scattachment(path: str, payload: bytes, *, offset: int = 32) -> bytes:
 def test_apply_sync_plan_uploads_concurrently_and_batches_deletes():
     client = FakeR2Client()
     plan = {
-        "uploads": [
-            {"local_path": f"assets/file_{index}.webp", "key": f"file_{index}.webp"} for index in range(8)
-        ],
+        "uploads": [{"local_path": f"assets/file_{index}.webp", "key": f"file_{index}.webp"} for index in range(8)],
         "deletes": [{"key": f"old_{index}.webp"} for index in range(1001)],
     }
     config = build.R2Config("https://example.invalid", "key", "secret", "assets")
@@ -67,6 +70,33 @@ def test_apply_sync_plan_rejects_invalid_worker_count():
         build.apply_sync_plan({"uploads": [], "deletes": []}, config, workers=0)
 
 
+@pytest.mark.parametrize("fails", [False, True])
+def test_selective_purge_must_finish_before_manifest_publication(fails):
+    client = FakeR2Client()
+    plan = {
+        "uploads": [
+            {"local_path": "assets/manifest.json", "key": "manifest.json"},
+            {"local_path": "assets/a.webp", "key": "a.webp"},
+        ],
+        "deletes": [{"key": "removed.webp"}],
+    }
+    config = build.R2Config("https://example.invalid", "key", "secret", "assets")
+
+    def purge():
+        assert [item[2] for item in client.uploaded] == ["a.webp"]
+        assert client.delete_batches
+        if fails:
+            raise RuntimeError("purge unavailable")
+
+    with patch("build.create_r2_client", return_value=client):
+        if fails:
+            with pytest.raises(RuntimeError, match="purge unavailable"):
+                build.apply_sync_plan(plan, config, workers=2, before_manifest=purge)
+        else:
+            build.apply_sync_plan(plan, config, workers=2, before_manifest=purge)
+    assert [item[2] for item in client.uploaded] == (["a.webp"] if fails else ["a.webp", "manifest.json"])
+
+
 def test_apply_sync_plan_sets_cache_and_content_type_for_shared_cdn_assets():
     client = FakeR2Client()
     plan = {
@@ -77,10 +107,7 @@ def test_apply_sync_plan_sets_cache_and_content_type_for_shared_cdn_assets():
             },
             {"local_path": "assets/fonts/clashking.woff2", "key": "fonts/clashking.woff2"},
             {"local_path": "assets/fonts/clashking.ttf", "key": "fonts/clashking.ttf"},
-            {
-                "local_path": "assets/logos/clashking-wordmark-dark.svg",
-                "key": "logos/clashking-wordmark-dark.svg",
-            },
+            {"local_path": "assets/logos/clashking-wordmark-dark.svg", "key": "logos/clashking-wordmark-dark.svg"},
             {"local_path": "assets/sceneries/example/music.ogg", "key": "sceneries/example/music.ogg"},
             {"local_path": "assets/static_data/war_leagues.json", "key": "static_data/war_leagues.json"},
             {"local_path": "assets/troops/barbarian/icon.webp", "key": "troops/barbarian/icon.webp"},
@@ -93,18 +120,14 @@ def test_apply_sync_plan_sets_cache_and_content_type_for_shared_cdn_assets():
         build.apply_sync_plan(plan, config, workers=2)
 
     uploaded = {key: extra_args for _, _, key, extra_args in client.uploaded}
+    for extra_args in uploaded.values():
+        assert extra_args.pop("Metadata") == {"sha256": "a" * 64}
     assert uploaded["achievements/war-champion-achievement-badge.glb"] == {
         "ContentType": "model/gltf-binary",
         "CacheControl": build.CDN_CACHE_CONTROL,
     }
-    assert uploaded["fonts/clashking.woff2"] == {
-        "ContentType": "font/woff2",
-        "CacheControl": build.CDN_CACHE_CONTROL,
-    }
-    assert uploaded["fonts/clashking.ttf"] == {
-        "ContentType": "font/ttf",
-        "CacheControl": build.CDN_CACHE_CONTROL,
-    }
+    assert uploaded["fonts/clashking.woff2"] == {"ContentType": "font/woff2", "CacheControl": build.CDN_CACHE_CONTROL}
+    assert uploaded["fonts/clashking.ttf"] == {"ContentType": "font/ttf", "CacheControl": build.CDN_CACHE_CONTROL}
     assert uploaded["logos/clashking-wordmark-dark.svg"] == {
         "ContentType": "image/svg+xml",
         "CacheControl": build.CDN_CACHE_CONTROL,
@@ -117,7 +140,7 @@ def test_apply_sync_plan_sets_cache_and_content_type_for_shared_cdn_assets():
         "ContentType": "application/json",
         "CacheControl": build.CDN_CACHE_CONTROL,
     }
-    assert uploaded["troops/barbarian/icon.webp"] is None
+    assert uploaded["troops/barbarian/icon.webp"] == {}
 
 
 def test_scenery_metadata_keeps_music_free_and_default_fields():
@@ -144,9 +167,7 @@ def test_scenery_metadata_keeps_music_free_and_default_fields():
 
 def test_legend_league_tiers_use_api_names_in_id_order():
     updater = StaticUpdater()
-    updater.open_file = lambda _: {
-        f"league_{index}": {"TID": "TID_LEAGUE_LEGENDARY"} for index in range(37)
-    }
+    updater.open_file = lambda _: {f"league_{index}": {"TID": "TID_LEAGUE_LEGENDARY"} for index in range(37)}
     updater._translate = lambda tid: "Legend League"
 
     leagues = updater._parse_league_tier_data()
@@ -161,14 +182,8 @@ def test_legend_league_tiers_use_api_names_in_id_order():
 def test_translation_patch_adds_and_overrides_translations(tmp_path, monkeypatch):
     localization = tmp_path / "localization"
     localization.mkdir()
-    (localization / "texts.json").write_text(
-        '{"TID_EXISTING": {"EN": "Original"}}',
-        encoding="utf-8",
-    )
-    (localization / "fr.json").write_text(
-        '{"TID_EXISTING": {"FR": "Texte original"}}',
-        encoding="utf-8",
-    )
+    (localization / "texts.json").write_text('{"TID_EXISTING": {"EN": "Original"}}', encoding="utf-8")
+    (localization / "fr.json").write_text('{"TID_EXISTING": {"FR": "Texte original"}}', encoding="utf-8")
     (localization / "texts_patch.json").write_text(
         """{
           "TID_EXISTING": {"TID": "TID_EXISTING", "EN": "Patched"},
@@ -181,10 +196,7 @@ def test_translation_patch_adds_and_overrides_translations(tmp_path, monkeypatch
     updater = StaticUpdater()
     translations = updater._parse_translation_data()
 
-    assert translations["TID_EXISTING"] == {
-        "EN": "Patched",
-        "FR": "Texte original",
-    }
+    assert translations["TID_EXISTING"] == {"EN": "Patched", "FR": "Texte original"}
     assert translations["TID_ADDED"] == {"EN": "Added", "FR": "Ajouté"}
     assert updater.translation_patch_tids == {"TID_EXISTING", "TID_ADDED"}
 
@@ -246,10 +258,7 @@ def test_seasonal_defense_townhall_requirement_is_on_each_module_level():
     updater._translate = lambda tid: tid
     updater._parse_resource = lambda resource: resource
     updater.full_abilities_data = {
-        "DefenseAbility": {
-            "OverrideTID": "TID_DEFENSE",
-            "OverrideInfoTID": "TID_DEFENSE_INFO",
-        },
+        "DefenseAbility": {"OverrideTID": "TID_DEFENSE", "OverrideInfoTID": "TID_DEFENSE_INFO"},
         "ModuleAbility": {
             "1": {
                 "Level": 1,
@@ -263,10 +272,7 @@ def test_seasonal_defense_townhall_requirement_is_on_each_module_level():
     }
     files = {
         "logic/seasonal_defense_archetypes.json": {
-            "SeasonalDefense": {
-                "SpecialAbility": "DefenseAbility",
-                "Modules": "SeasonalModule",
-            }
+            "SeasonalDefense": {"SpecialAbility": "DefenseAbility", "Modules": "SeasonalModule"}
         },
         "logic/seasonal_defense_modules.json": {
             "SeasonalModule": {
@@ -277,12 +283,7 @@ def test_seasonal_defense_townhall_requirement_is_on_each_module_level():
                 "2": {"TownHallLevel": 13, "BuildCost": 200},
             }
         },
-        "logic/seasonal_defense.json": {
-            "Season4": {
-                "TID": "TID_SEASON_FOUR",
-                "1": {"Archetypes": "SeasonalDefense"},
-            }
-        },
+        "logic/seasonal_defense.json": {"Season4": {"TID": "TID_SEASON_FOUR", "1": {"Archetypes": "SeasonalDefense"}}},
     }
     updater.open_file = files.__getitem__
 
@@ -304,12 +305,7 @@ def test_asset_extraction_builds_go_extractor_once_and_reuses_it(tmp_path, monke
     monkeypatch.setattr(
         update_static,
         "fetch_fingerprint_manifest",
-        AsyncMock(
-            return_value=(
-                "fingerprint",
-                {"files": [{"file": "sc/one.sctx"}, {"file": "sc/two.sctx"}]},
-            )
-        ),
+        AsyncMock(return_value=("fingerprint", {"files": [{"file": "sc/one.sctx"}, {"file": "sc/two.sctx"}]})),
     )
     monkeypatch.setattr(update_static, "download_file", AsyncMock(return_value=b"texture"))
     commands = []
@@ -350,10 +346,7 @@ def test_asset_extraction_recovers_missing_sc_bundle_from_attachments(tmp_path, 
         allow_missing_source=True,
     )
 
-    attachment_payloads = {
-        "sc/decos.sc": b"SC\x06decoration-bundle",
-        "sc/decos_0.sctx": b"texture-sidecar",
-    }
+    attachment_payloads = {"sc/decos.sc": b"SC\x06decoration-bundle", "sc/decos_0.sctx": b"texture-sidecar"}
     refs = {}
     wrapped_by_remote_path = {}
     manifest_files = []
@@ -372,9 +365,7 @@ def test_asset_extraction_recovers_missing_sc_bundle_from_attachments(tmp_path, 
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        update_static,
-        "fetch_fingerprint_manifest",
-        AsyncMock(return_value=("fingerprint", {"files": manifest_files})),
+        update_static, "fetch_fingerprint_manifest", AsyncMock(return_value=("fingerprint", {"files": manifest_files}))
     )
     discover = AsyncMock(return_value=SCAttachmentIndex(by_path=refs, failures=()))
     monkeypatch.setattr(update_static, "discover_scattachments", discover)
@@ -394,16 +385,7 @@ def test_asset_extraction_recovers_missing_sc_bundle_from_attachments(tmp_path, 
         exported_file = output_dir / "new_decoration.webp"
         exported_file.write_bytes(b"RIFFxxxxWEBP")
         (output_dir / "manifest.json").write_text(
-            json.dumps(
-                {
-                    "exports": [
-                        {
-                            "export_name": "new_decoration",
-                            "output_file": str(exported_file),
-                        }
-                    ]
-                }
-            )
+            json.dumps({"exports": [{"export_name": "new_decoration", "output_file": str(exported_file)}]})
         )
 
     monkeypatch.setattr(update_static.subprocess, "run", fake_run)
@@ -449,9 +431,7 @@ def test_optional_asset_with_unpublished_source_is_skipped(tmp_path, monkeypatch
         allow_missing_source=True,
     )
     monkeypatch.setattr(
-        update_static,
-        "fetch_fingerprint_manifest",
-        AsyncMock(return_value=("fingerprint", {"files": []})),
+        update_static, "fetch_fingerprint_manifest", AsyncMock(return_value=("fingerprint", {"files": []}))
     )
     run = Mock()
     monkeypatch.setattr(update_static.subprocess, "run", run)
@@ -466,15 +446,10 @@ def test_required_asset_with_unpublished_source_still_fails(tmp_path, monkeypatc
     updater = StaticUpdater()
     updater.BASE_PATH = str(tmp_path / "assets")
     updater.register_sc_asset(
-        "sc/buildings.sc",
-        "new_building",
-        "buildings/home-village/new_building/level_1",
-        first_frame=True,
+        "sc/buildings.sc", "new_building", "buildings/home-village/new_building/level_1", first_frame=True
     )
     monkeypatch.setattr(
-        update_static,
-        "fetch_fingerprint_manifest",
-        AsyncMock(return_value=("fingerprint", {"files": []})),
+        update_static, "fetch_fingerprint_manifest", AsyncMock(return_value=("fingerprint", {"files": []}))
     )
 
     with pytest.raises(FileNotFoundError, match="missing source bundle file.*sc/buildings.sc"):
@@ -485,36 +460,25 @@ def test_super_wizard_tower_levels_share_the_level_one_building_base():
     updater = StaticUpdater()
     building_data = {"TID": "TID_BUILDING_MERGED_WIZARD_TOWER"}
 
-    assert updater.building_base_asset_name(building_data, {"BuildingLevel": 1}) == (
-        "merged_wizard_tower_lvl1_base"
-    )
-    assert updater.building_base_asset_name(building_data, {"BuildingLevel": 2}) == (
-        "merged_wizard_tower_lvl1_base"
-    )
+    assert updater.building_base_asset_name(building_data, {"BuildingLevel": 1}) == ("merged_wizard_tower_lvl1_base")
+    assert updater.building_base_asset_name(building_data, {"BuildingLevel": 2}) == ("merged_wizard_tower_lvl1_base")
 
 
 def test_configured_building_base_names_still_take_precedence():
     updater = StaticUpdater()
 
-    assert updater.building_base_asset_name(
-        {
-            "TID": "TID_BUILDING_HOUSING",
-            "ExportNameBase": "housing_base",
-        },
-        {},
-    ) == "housing_base"
-    assert updater.building_base_asset_name(
-        {"TID": "TID_BUILDING_CANNON"},
-        {"ExportNameBase": "unexpected_base"},
-    ) is None
+    assert (
+        updater.building_base_asset_name({"TID": "TID_BUILDING_HOUSING", "ExportNameBase": "housing_base"}, {})
+        == "housing_base"
+    )
+    assert (
+        updater.building_base_asset_name({"TID": "TID_BUILDING_CANNON"}, {"ExportNameBase": "unexpected_base"}) is None
+    )
 
 
 def test_ignored_ids_are_loaded_from_local_file(tmp_path):
     ignored_file = tmp_path / ".ignored.txt"
-    ignored_file.write_text(
-        "# Decorations\n18000000 # Anniversary Fountain\n\n90000042\n",
-        encoding="utf-8",
-    )
+    ignored_file.write_text("# Decorations\n18000000 # Anniversary Fountain\n\n90000042\n", encoding="utf-8")
 
     assert update_static.load_ignored_ids(ignored_file) == {18000000, 90000042}
 
@@ -596,15 +560,8 @@ def test_download_files_fetches_csv_and_required_scindexes_only(monkeypatch):
 
     asyncio.run(updater.download_files())
 
-    assert set(requested) == {
-        "logic/resources.csv",
-        "logic/decos_logic.scindex",
-        "data/assetdata.scindex",
-    }
-    process_indexes.assert_called_once_with(
-        b"logic/decos_logic.scindex",
-        b"data/assetdata.scindex",
-    )
+    assert set(requested) == {"logic/resources.csv", "logic/decos_logic.scindex", "data/assetdata.scindex"}
+    process_indexes.assert_called_once_with(b"logic/decos_logic.scindex", b"data/assetdata.scindex")
     extract_assets.assert_awaited_once()
 
 
@@ -635,7 +592,7 @@ def test_hero_troop_and_pet_weights_are_emitted_from_top_level_data():
                 "FriendlyGroupWeight": 3000,
                 "HealerWeight": 21,
                 "1": {"LaboratoryLevel": 1},
-            }
+            },
         },
         "logic/super_licences.json": {},
         "logic/heroes.json": {
@@ -653,7 +610,7 @@ def test_hero_troop_and_pet_weights_are_emitted_from_top_level_data():
                 "FriendlyGroupWeight": 230,
                 "HealerWeight": 21,
                 "1": {},
-            }
+            },
         },
         "logic/pets.json": {
             "WeightedPet": {
@@ -695,10 +652,7 @@ def test_previous_release_lookup_rejects_an_invalid_current_ref():
 
 
 def test_previous_release_lookup_returns_none_when_valid_ref_has_no_older_tag():
-    with patch(
-        "build.run_git",
-        side_effect=["commit-sha", build.BuildError("no tags before release")],
-    ) as run_git:
+    with patch("build.run_git", side_effect=["commit-sha", build.BuildError("no tags before release")]) as run_git:
         assert build.infer_previous_ref("v1.0.0", None) is None
 
     assert run_git.call_args_list[0].args[0] == ["rev-parse", "--verify", "v1.0.0^{commit}"]
@@ -710,15 +664,6 @@ def test_release_sync_plan_includes_manifest(tmp_path, monkeypatch):
     manifest.parent.mkdir()
     manifest.write_text('{"version": 1, "assets": []}\n', encoding="utf-8")
 
-    plan = build.build_sync_plan(
-        [build.DiffEntry(status="A", path=manifest.as_posix())],
-        assets_root="assets",
-    )
+    plan = build.build_sync_plan([build.DiffEntry(status="A", path=manifest.as_posix())], assets_root="assets")
 
-    assert plan["uploads"] == [
-        {
-            "local_path": "assets/manifest.json",
-            "key": "manifest.json",
-            "reason": "added",
-        }
-    ]
+    assert plan["uploads"] == [{"local_path": "assets/manifest.json", "key": "manifest.json", "reason": "added"}]

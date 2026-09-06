@@ -35,7 +35,8 @@ a Worker deployment. SVG/GIF do not create synthetic AVIF aliases.
 
 Unknown query parameters are ignored before cache lookup, preserving legacy
 cache-buster URLs without creating extra variants. `size` must be valid and appear
-at most once, even on originals; a valid size on an original path does not resize
+at most once, even on originals. `v` is ignored, like other unknown parameters;
+manifest refreshes mark existing local records pending instead. A valid size on an original path does not resize
 it. Escaped path segments are normalized once; separators inside segments, control
 characters and the reserved `__admin` namespace are rejected. Requests never fetch
 an external URL. Arbitrary query parameters cannot alter quality, source or format.
@@ -67,10 +68,10 @@ conditional headers or cache-bypass headers to AssetOrigin. GET/HEAD share a bod
 fill. Worker version isolation stays enabled; a deployment gets a fresh namespace.
 Errors are never stored and there is no negative-cache invalidation dependency.
 
-Image client freshness is `public, max-age=31536000, immutable`. JSON and other
-non-image clients receive `public, max-age=0, must-revalidate`, while AssetOrigin
+Clients receive `public, max-age=0, must-revalidate`, while AssetOrigin
 sets `Cloudflare-CDN-Cache-Control: public, max-age=60` for JSON and a one-year
-lifetime for other assets. JSON therefore refreshes without release purges.
+lifetime for other assets. Releases also purge affected entries; the JSON TTL is
+a fallback, not a replacement for release invalidation.
 The gateway evaluates
 If-None-Match (including weak tags, lists and wildcard), then If-Modified-Since,
 against the cached metadata and returns 304 without a body when appropriate.
@@ -95,31 +96,35 @@ No periodic image revalidation or extra runtime manifest is introduced. A TTL is
 freshness limit, not a storage guarantee; Cloudflare can evict an entry earlier.
 Device copies may remain old after a rare overwrite, as accepted in the plan.
 
-## Optional manual cache clearing
+## Selective release cache clearing
 
-Asset releases do not purge the Worker cache, require purge credentials, or wait
-for cache invalidation. Same-path overwrites may keep serving cached content; this
-is an accepted rollout decision for images. JSON has a one-minute edge lifetime,
-so app refresh checks can discover releases without a manual purge. Client
-revalidation does not bypass an edge representation while it is still fresh.
+Releases upload changed files and delete removed files, then purge their cache
+tags before publishing the new manifest. The manifest is uploaded last and its
+tag is purged separately. A failed source purge prevents manifest publication.
+Each raster filename family shares one hashed tag across its original formats
+and every AVIF size; unrelated files retain their caches. Added paths are included
+so a new real AVIF also invalidates an older generated representation.
 
-The optional `POST /__admin/purge` operation and `worker_purge.py` helper remain
-available for a future manual operation, disabled by default. Enabling them is
-not a release or cutover requirement. If needed later, provision a server-only
-`PURGE_TOKEN` of at least 32 characters and set `PURGE_ENABLED=true`. The helper
-uses `ASSETS_WORKER_PURGE_URL` and `ASSETS_WORKER_PURGE_TOKEN` only when explicitly
-run. Never put those credentials in the app. A zone purge does not clear the
-AssetOrigin entrypoint cache. The helper makes two passes, 60 seconds apart;
-in-flight fills can still repopulate stale content, so verify freshness after a
-manual purge. No automatic cache-clearing guarantee is made.
+Before releasing, provision a server-only `PURGE_TOKEN` of at least 32 characters
+and set `PURGE_ENABLED=true`. Configure the GitHub variable
+`ASSETS_WORKER_PURGE_URL` with the Worker's `/__admin/purge` URL and the secret
+`ASSETS_WORKER_PURGE_TOKEN` with the same token. Missing configuration fails the
+release before R2 writes. Never put the token in the app. The authenticated POST
+accepts only explicit tags, not a whole-cache purge. Manual retries can use
+`python worker_purge.py --keys troops/barbarian.webp manifest.json`.
+
+The helper batches tags in groups of 100 and makes two passes, 60 seconds apart,
+to reduce stale in-flight fills. This is not an atomic upload/cache transaction;
+live staging must verify propagation. Retry a failed release with the same file
+changes. A zone purge does not clear the AssetOrigin entrypoint cache.
 
 ## Configuration and local checks
 
 The R2 `ASSETS` binding points to the existing `clashking-assets` bucket. Override
 it with a separate fixture bucket for staging. Enable the Images `IMAGES` binding
-in the correct account. Leave `PURGE_ENABLED=false` for this rollout.
-No GitHub purge URL, token or required flag is needed. Existing R2 and optional
-translation-KV configuration remain independent.
+in the correct account. The checked-in purge switch remains off until the token
+and release settings above are provisioned. Translation files are generated by
+`update_static.py` and uploaded to R2; translation KV is no longer used.
 
 From `worker/`, using Node 24 or newer:
 
@@ -137,13 +142,13 @@ checkout, set `WRANGLER_LOG_PATH=/tmp/assets-worker-wrangler.log` if needed.
 From the repository root, run:
 
 ```sh
-.venv/bin/python -m pytest -q test_worker_purge.py test_build.py test_translation_kv.py
-.venv/bin/python -m ruff check build.py worker_purge.py check_image_sources.py test_worker_purge.py
+.venv/bin/python -m pytest -q tests
+.venv/bin/python -m ruff check build.py worker_purge.py check_image_sources.py tests/test_worker_purge.py
 ```
 
 Tests cover source mapping, size bounds/options, cache-key normalization, real AVIF
 precedence, original and range handling, JSON conditions, authentication and
-entrypoint scope, and the absence of release-triggered purges. Bindings and entrypoint contexts
+entrypoint scope, and selective release-triggered purges. Bindings and entrypoint contexts
 are mocked; these tests do not establish live tiered-cache behavior, AVIF encoder
 output, custom-domain readiness or purge propagation. No visual tests are used.
 
@@ -191,16 +196,45 @@ verified to retain the intended animation; never silently substitute a thumbnail
 for an animation. Keep SVG, fonts, audio and JSON URLs unchanged.
 
 Implement a Clear image cache button that clears the native image library's memory
-and disk entries, including original and AVIF URLs. Changing a query cache-buster
-will not force a new edge variant. A refetch after an edge purge receives current
-content, but previously saved device images otherwise retain their accepted TTL.
+and disk entries, including original and AVIF URLs. For automatic refresh, retain
+the latest manifest and compare source SHAs with a persistent per-file inventory.
+Each inventory record has `file`, `sha`, and `pendingSha` (null when current).
+Manifest checks update pending SHAs on existing records without downloading unused
+images. Images use an app-owned native disk cache, with independent records for
+each requested size. On display, retain the previous file while downloading the
+replacement; commit its file and SHA together, then remove the previous copy.
+Each size expires after 30 days without being viewed. Cleanup runs on native app
+startup/resume and during image use, coalesced to at most once per minute. Viewing
+one size does not renew the other sizes; JSON files are excluded from expiry.
+The cache is bounded to 512 entries / 256 MiB and checks file existence, so OS
+eviction cannot leave a false cache hit. Web image rendering retains browser
+caching; the managed disk-cache adapter applies to the native app.
+
+Refresh changed static sections and the selected language immediately. Save the
+JSON body before committing its local SHA and clearing its matching pending SHA.
+Failures retain the old file and pending SHA across app restarts. If another
+manifest arrives during downloading, update `pendingSha`; completion of an older
+download must not clear that newer pending version. Notice processing runs even
+when the saved manifest is reused, so an interrupted update remains retryable.
+
+Release uploads attach the actual file SHA as R2 custom metadata `sha256`. The
+Worker returns it as `X-Asset-Source-Sha` for originals and transformed variants,
+and exposes the header through CORS. The app verifies it before committing a
+replacement. Objects uploaded before this metadata exists can still be verified
+by hashing their original bytes; generated AVIF responses without the header
+fall back to the original rather than being falsely marked current.
 
 For JSON, retain a cached-first/offline body and validators. Check on login/resume
 and at most once per minute while foregrounded, coalescing concurrent checks.
 Prefer If-None-Match conditional GET: retain the body on 304, atomically replace
 body and validators on 200, and keep the last good body on network failure. Existing
 HEAD/Last-Modified followed by GET remains compatible during migration. No new
-runtime manifest is required.
+separate minified manifest is required. The app reads `manifest.json` and the
+split `static_data/<section>.json` and `translations/<LOCALE>.json` files generated
+by `update_static.py`, rather than downloading the combined metadata files.
+The manifest's `data` object contains separate `stats` and `translations` arrays.
+Each entry contains a full relative `path` and its `sha`; image category arrays
+remain under `assets`. URLs and file extensions are derived from paths.
 
 ## Official capability and billing references (verified 2026-09-04)
 
