@@ -6,15 +6,18 @@ def test_viewer_consumes_hosted_manifest_contract():
 
     assert 'const MANIFEST_URL = "https://assets.clashk.ing/manifest.json"' in source
     assert "api.github.com" not in source
-    assert "data.assets" in source
-    for field in ("entry.path", "entry.category", "entry.display_name", "entry.extension", "entry.url"):
+    assert "Object.entries(data.assets || {})" in source
+    assert "assetFromManifestEntry(entry, index, category)" in source
+    assert 'entry.path.split(".").pop()' in source
+    assert 'new URL(entry.path.split("/").map(encodeURIComponent).join("/"), MANIFEST_URL).href' in source
+    for field in ("entry.path", "entry.display_name"):
         assert field in source
 
 
 def test_viewer_keeps_supported_formats_and_bot_exclusion():
     source = Path("assets/viewer.js").read_text(encoding="utf-8")
 
-    assert '["gif", "jpeg", "jpg", "png", "svg", "webp"]' in source
+    assert '["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"]' in source
     assert 'entry.path.startsWith("bot/")' in source
 
 
