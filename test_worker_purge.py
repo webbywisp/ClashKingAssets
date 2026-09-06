@@ -101,6 +101,7 @@ def test_releases_never_use_purge_configuration():
     assert 'ASSETS_WORKER_PURGE' not in workflow
     assert 'worker_purge' not in source
     assert 'purge_worker_cache' not in source
+    assert workflow.count('\nconcurrency:') == 1
 
 
 def test_source_collision_validation_and_real_layout(tmp_path):

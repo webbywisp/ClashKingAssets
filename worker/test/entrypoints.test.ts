@@ -25,7 +25,7 @@ test('gateway normalizes requests, strips incoming headers, and handles conditio
         ETag: '"new"', 'Last-Modified': 'Fri, 04 Sep 2026 00:00:00 GMT',
         'Content-Type': 'application/json', 'Content-Length': '2',
         'Cache-Control': 'public, max-age=0, must-revalidate',
-        'Cloudflare-CDN-Cache-Control': 'public, max-age=31536000',
+        'Cloudflare-CDN-Cache-Control': 'public, max-age=60',
       } });
     },
   } } }, {});

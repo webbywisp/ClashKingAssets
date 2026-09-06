@@ -69,7 +69,9 @@ Errors are never stored and there is no negative-cache invalidation dependency.
 
 Image client freshness is `public, max-age=31536000, immutable`. JSON and other
 non-image clients receive `public, max-age=0, must-revalidate`, while AssetOrigin
-sets `Cloudflare-CDN-Cache-Control: public, max-age=31536000`. The gateway evaluates
+sets `Cloudflare-CDN-Cache-Control: public, max-age=60` for JSON and a one-year
+lifetime for other assets. JSON therefore refreshes without release purges.
+The gateway evaluates
 If-None-Match (including weak tags, lists and wildcard), then If-Modified-Since,
 against the cached metadata and returns 304 without a body when appropriate.
 If-None-Match takes precedence. HEAD returns the same Last-Modified, ETag and
@@ -97,8 +99,9 @@ Device copies may remain old after a rare overwrite, as accepted in the plan.
 
 Asset releases do not purge the Worker cache, require purge credentials, or wait
 for cache invalidation. Same-path overwrites may keep serving cached content; this
-is an accepted rollout decision. It applies to JSON as well as images: client
-revalidation does not bypass the Worker's cached representation.
+is an accepted rollout decision for images. JSON has a one-minute edge lifetime,
+so app refresh checks can discover releases without a manual purge. Client
+revalidation does not bypass an edge representation while it is still fresh.
 
 The optional `POST /__admin/purge` operation and `worker_purge.py` helper remain
 available for a future manual operation, disabled by default. Enabling them is

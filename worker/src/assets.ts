@@ -59,7 +59,8 @@ function assetHeaders(object: R2Object, key: string, transformed: boolean, size?
   headers.set('ETag', transformed ? `W/"${object.etag}-avif-q80-v1-${size ?? 'full'}"` : object.httpEtag);
   headers.set('Cache-Control', headers.get('Content-Type')!.startsWith('image/') ?
     `public, max-age=${YEAR}, immutable` : 'public, max-age=0, must-revalidate');
-  headers.set('Cloudflare-CDN-Cache-Control', `public, max-age=${YEAR}`);
+  // Mutable game metadata must refresh without any release-triggered purge.
+  headers.set('Cloudflare-CDN-Cache-Control', `public, max-age=${ext === 'json' ? 60 : YEAR}`);
   headers.set('Access-Control-Allow-Origin', '*');
   headers.set('Access-Control-Expose-Headers', 'ETag, Last-Modified, Content-Length, Content-Range, Accept-Ranges');
   headers.set('X-Content-Type-Options', 'nosniff');

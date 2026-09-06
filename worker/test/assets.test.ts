@@ -127,7 +127,7 @@ test('mutable JSON has edge freshness, client revalidation, weak/list ETags, HEA
   const { env } = fixture({ 'static_data.json': '{"new":true}' });
   const response = () => serveAsset(req('/static_data.json'), env);
   const initial = await response();
-  assert.equal(initial.headers.get('Cloudflare-CDN-Cache-Control'), `public, max-age=${YEAR}`);
+  assert.equal(initial.headers.get('Cloudflare-CDN-Cache-Control'), 'public, max-age=60');
   assert.equal(initial.headers.get('Cache-Control'), 'public, max-age=0, must-revalidate');
   for (const condition of ['"abc"', 'W/"abc"', '"other", W/"abc"', '*']) {
     const result = await clientResponse(req('/static_data.json', { headers: { 'If-None-Match': condition } }), await response());
