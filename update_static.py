@@ -11,6 +11,7 @@ import json
 import logging
 import lzma
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -2430,7 +2431,8 @@ class StaticUpdater:
             self.register_sc_asset(
                 source_sc=label_data.get("IconSWF"),
                 asset_name=label_data.get("IconExportName"),
-                save_path=f"clan_labels/{self.clean_name(self._translate(tid=label_data.get('TID')))}"
+                save_path=f"clan_labels/{self.clean_name(self._translate(tid=label_data.get('TID')))}",
+                first_frame=True,
             )
 
             hold_data = {
@@ -2454,7 +2456,8 @@ class StaticUpdater:
             self.register_sc_asset(
                 source_sc=label_data.get("IconSWF"),
                 asset_name=label_data.get("IconExportName"),
-                save_path=f'player_labels/{self.clean_name(self._translate(tid=label_data.get("TID")))}'
+                save_path=f'player_labels/{self.clean_name(self._translate(tid=label_data.get("TID")))}',
+                first_frame=True,
             )
 
             hold_data = {
@@ -2607,6 +2610,7 @@ class StaticUpdater:
 
         with open(f"{self.BASE_PATH}/translations.json", "w", encoding="utf-8") as jf:
             jf.write(json.dumps(self.translation_data, indent=2, ensure_ascii=False))
+        self._write_translation_json_files()
 
         if not self.KEEP_JSON:
             for folder in ("csv", "logic", "localization"):
@@ -2618,6 +2622,25 @@ class StaticUpdater:
                         file_path.unlink()
                     except OSError as e:
                         logging.warning(f"Could not delete {file_path}: {e}")
+
+    def _write_translation_json_files(self):
+        catalogs = {}
+        for tid, translations in self.translation_data.items():
+            for locale, value in translations.items():
+                if not re.fullmatch(r"[A-Z]{2,8}", locale):
+                    raise ValueError(f"Invalid game locale: {locale!r}")
+                if isinstance(value, str) and value:
+                    catalogs.setdefault(locale, {})[tid] = value
+        target = Path(self.BASE_PATH) / "translations"
+        target.mkdir(parents=True, exist_ok=True)
+        for locale, catalog in sorted(catalogs.items()):
+            (target / f"{locale}.json").write_text(
+                json.dumps(catalog, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+        # This directory exclusively contains generated language files.
+        for path in target.glob("*.json"):
+            if path.stem not in catalogs:
+                path.unlink()
 
     def _write_static_json_files(self, master_data):
         base_path = Path(self.BASE_PATH)

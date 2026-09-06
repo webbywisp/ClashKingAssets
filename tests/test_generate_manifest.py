@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -10,6 +11,15 @@ def touch(root: Path, relative_path: str) -> None:
     path = root / relative_path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.touch()
+
+
+def test_manifest_data_has_separate_stat_and_translation_lists(tmp_path):
+    touch(tmp_path, "static_data/troops.json")
+    touch(tmp_path, "translations/FR.json")
+    data = build_manifest(tmp_path)["data"]
+    assert set(data) == {"stats", "translations"}
+    assert data["stats"] == [{"path": "static_data/troops.json", "sha": hashlib.sha256(b"").hexdigest()}]
+    assert data["translations"] == [{"path": "translations/FR.json", "sha": hashlib.sha256(b"").hexdigest()}]
 
 
 def test_manifest_is_sorted_and_includes_supported_formats(tmp_path):
@@ -27,23 +37,15 @@ def test_manifest_is_sorted_and_includes_supported_formats(tmp_path):
 
     manifest = build_manifest(assets_root)
 
-    assert [asset["path"] for asset in manifest["assets"]] == sorted(
-        asset["path"] for asset in manifest["assets"]
-    )
-    assert {asset["extension"] for asset in manifest["assets"]} == {
-        "gif",
-        "jpeg",
-        "jpg",
-        "png",
-        "svg",
-        "webp",
-    }
-    assert manifest["assets"][0] == {
+    assets = [asset for category in manifest["assets"].values() for asset in category]
+    assert manifest["version"] == 2
+    assert [asset["path"] for asset in assets] == sorted(asset["path"] for asset in assets)
+    assert {Path(asset["path"]).suffix[1:].lower() for asset in assets} == {"gif", "jpeg", "jpg", "png", "svg", "webp"}
+    assert assets[0] == {
         "path": "a-first/name_with-hyphen.png",
-        "category": "a-first",
         "display_name": "name with hyphen",
-        "extension": "png",
-        "url": "https://assets.clashk.ing/a-first/name_with-hyphen.png",
+        "sha": hashlib.sha256(b"").hexdigest(),
+        "animated": False,
     }
 
 
@@ -55,8 +57,8 @@ def test_manifest_excludes_bot_and_unsupported_files(tmp_path):
 
     manifest = build_manifest(assets_root)
 
-    assert [asset["path"] for asset in manifest["assets"]] == ["troops/barbarian/icon.webp"]
-    assert manifest["assets"][0]["display_name"] == "barbarian"
+    assert [asset["path"] for asset in manifest["assets"]["troops"]] == ["troops/barbarian/icon.webp"]
+    assert manifest["assets"]["troops"][0]["display_name"] == "barbarian"
 
 
 def test_manifest_names_leveled_buildings_and_traps_with_their_parent(tmp_path):
@@ -66,7 +68,7 @@ def test_manifest_names_leveled_buildings_and_traps_with_their_parent(tmp_path):
     touch(assets_root, "equipment/eternal_tome/level_3.webp")
 
     manifest = build_manifest(assets_root)
-    names = {asset["path"]: asset["display_name"] for asset in manifest["assets"]}
+    names = {asset["path"]: asset["display_name"] for category in manifest["assets"].values() for asset in category}
 
     assert names["buildings/home-village/hidden_tesla/level_12.webp"] == "hidden tesla level 12"
     assert names["traps/builder-base/push_trap/level_4.webp"] == "push trap level 4"
@@ -98,7 +100,7 @@ def test_manifest_json_has_only_reproducible_top_level_fields(tmp_path):
     write_manifest(assets_root, manifest_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
-    assert set(manifest) == {"version", "assets"}
+    assert set(manifest) == {"version", "assets", "data"}
 
 
 def test_release_workflow_verifies_manifest_before_asset_sync():
