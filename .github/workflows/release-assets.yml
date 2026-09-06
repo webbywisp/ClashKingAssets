@@ -9,6 +9,10 @@ concurrency:
   group: release-assets-${{ github.event.release.tag_name }}
   cancel-in-progress: false
 
+concurrency:
+  group: release-assets-r2
+  cancel-in-progress: false
+
 jobs:
   sync-assets:
     runs-on: ubuntu-latest

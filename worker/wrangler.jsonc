@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "clashking-assets",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-04",
+  "workers_dev": false,
+  "preview_urls": false,
+  // Existing public-assets bucket. No bucket is provisioned here.
+  "r2_buckets": [{ "binding": "ASSETS", "bucket_name": "clashking-assets" }],
+  "images": { "binding": "IMAGES" },
+  "cache": { "enabled": false, "cross_version_cache": false },
+  "exports": {
+    "default": { "type": "worker", "cache": { "enabled": false } },
+    "AssetOrigin": { "type": "worker", "cache": { "enabled": true } }
+  },
+  "observability": { "enabled": true },
+  "limits": { "cpu_ms": 100 },
+  // Add routes: [{ pattern: "assets.clashk.ing", custom_domain: true }]
+  // ONLY during the authorized cutover described in README.md.
+  "vars": { "PURGE_ENABLED": "false" }
+}

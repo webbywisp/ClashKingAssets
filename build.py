@@ -12,6 +12,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from check_image_sources import check_image_sources
 from generate_manifest import ManifestError, check_manifest
 
 load_dotenv()
@@ -397,6 +398,10 @@ def main() -> int:
         entries = git_diff_entries(previous_ref, current_ref)
 
     plan = build_sync_plan(entries, assets_root)
+    try:
+        check_image_sources(Path(assets_root))
+    except ValueError as exc:
+        raise BuildError(str(exc)) from exc
 
     summary = build_summary(
         current_ref=current_ref,
