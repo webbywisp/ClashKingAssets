@@ -15,7 +15,6 @@
   },
   "observability": { "enabled": true },
   "limits": { "cpu_ms": 100 },
-  // Add routes: [{ pattern: "assets.clashk.ing", custom_domain: true }]
-  // ONLY during the authorized cutover described in README.md.
-  "vars": { "PURGE_ENABLED": "false" }
+  "routes": [{ "pattern": "assets.clashk.ing", "custom_domain": true }],
+  "vars": { "PURGE_ENABLED": "true" }
 }

@@ -202,14 +202,14 @@ test('purge requires POST, configured strong secret, auth, bounded tags and exac
   assert.equal((await purgeRequest(req('/__admin/purge', authorized), secret, 'true', async () => { throw Error('secret'); })).status, 502);
 });
 
-test('wrangler enables cache only for the asset entrypoint and keeps production cutover manual', () => {
+test('wrangler enables cache only for the asset entrypoint and owns the production domain', () => {
   const config = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
   assert.equal(config.exports.default.cache.enabled, false);
   assert.equal(config.exports.AssetOrigin.cache.enabled, true);
   assert.equal(config.cache.cross_version_cache, false);
-  assert.equal(config.routes, undefined);
+  assert.deepEqual(config.routes, [{ pattern: 'assets.clashk.ing', custom_domain: true }]);
   assert.equal(config.workers_dev, false);
-  assert.equal(config.vars.PURGE_ENABLED, 'false');
+  assert.equal(config.vars.PURGE_ENABLED, 'true');
 });
 
 
