@@ -2,6 +2,7 @@ package webp
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"image"
 	"image/color"
@@ -12,8 +13,54 @@ import (
 	"testing"
 	"time"
 
+	webpcodec "github.com/deepteams/webp"
 	"github.com/deepteams/webp/animation"
 )
+
+func TestSingleDistinctAnimationFrameIsWrittenAsStill(t *testing.T) {
+	for _, count := range []int{1, 20} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			var output bytes.Buffer
+			encoder, err := NewInProcessEncoder().NewAnimation(&output, 8, 6, Options{Quality: 88, Method: 0})
+			if err != nil {
+				t.Fatal(err)
+			}
+			frame := image.NewNRGBA(image.Rect(0, 0, 8, 6))
+			frame.SetNRGBA(3, 2, color.NRGBA{R: 200, G: 100, B: 50, A: 128})
+			for range count {
+				if err := encoder.AddFrame(frame, 30); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := encoder.Close(); err != nil {
+				t.Fatal(err)
+			}
+			data := output.Bytes()
+			for offset := 12; offset+8 <= len(data); {
+				kind := string(data[offset : offset+4])
+				size := int(binary.LittleEndian.Uint32(data[offset+4 : offset+8]))
+				if kind == "ANIM" || kind == "ANMF" {
+					t.Fatalf("still contains %s", kind)
+				}
+				if kind == "VP8X" && data[offset+8]&2 != 0 {
+					t.Fatal("animation flag remains")
+				}
+				offset += 8 + size + size%2
+			}
+			decoded, err := webpcodec.Decode(bytes.NewReader(data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if decoded.Bounds() != frame.Bounds() {
+				t.Fatalf("canvas changed: %v", decoded.Bounds())
+			}
+			_, _, _, alpha := decoded.At(3, 2).RGBA()
+			if alpha != 128*257 {
+				t.Fatalf("alpha changed: %d", alpha)
+			}
+		})
+	}
+}
 
 func TestInProcessAnimationPreservesMillisecondDurations(t *testing.T) {
 	var encoded bytes.Buffer
