@@ -16,13 +16,6 @@ does cost us time & money please credit us somewhere in your project. Thanks!
 
 Asset responses include a `Last-Modified` header. You can make a `HEAD` request and compare that header to see if an asset has a newer version.
 
-## Assets delivery Worker
-
-The private-R2 image Worker, AVIF request contract, selective release cache clearing,
-configuration, app requirements, and migration checklist are documented in
-[worker/README.md](worker/README.md). The existing bucket is `clashking-assets`.
-
-
 ## Programmatic Paths
 
 Names are standardized so URLs can be generated from static data names.
