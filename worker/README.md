@@ -151,7 +151,7 @@ entrypoint scope, and selective release-triggered purges. Bindings and entrypoin
 are mocked; these tests do not establish live tiered-cache behavior, AVIF encoder
 output, custom-domain readiness or purge propagation. No visual tests are used.
 
-## Migration checklist — requires separate authorization
+## Production migration checklist
 
 1. Inventory the current `assets.clashk.ing` DNS/R2 custom-domain association,
    bucket name, R2 public-access/CORS settings and legacy cache rules. Save rollback
@@ -167,20 +167,20 @@ output, custom-domain readiness or purge propagation. No visual tests are used.
    inspect cache status/logs. Different query garbage and headers must converge on
    the canonical inner key. Confirm gateway and AssetOrigin logs distinguish hits.
 4. Verify cached JSON/image reads, conditional GET and HEAD behavior. Same-path
-   overwrites are allowed to remain cached; automatic invalidation is out of scope.
+   overwrites remain cached until the selective release purge or cache expiry.
 5. Pause asset releases and other R2 writers for the production migration. Prepare
    the production Worker with the existing private R2 binding, and
    confirm readiness before detaching the existing R2 custom-domain association.
    Do not attempt simultaneous R2 and Worker ownership of `assets.clashk.ing`.
 6. In the approved window, remove the old R2 domain association/DNS conflict and
-   attach `assets.clashk.ing` as a Worker custom domain using the commented route
-   shape in `wrangler.jsonc`. Keep the hostname and all object keys unchanged.
+   attach `assets.clashk.ing` as a Worker custom domain using the route in
+   `wrangler.jsonc`. Keep the hostname and all object keys unchanged.
    Disable any remaining public R2 access only after private-binding reads work.
    No `r2.clashk.ing` hostname is needed. Clear old zone/R2 cache as part of retiring
    that serving path; this is separate from the new AssetOrigin cache purge.
-7. Repeat production read/conditional/CORS probes before resuming releases.
-   Do not configure release-triggered purging. Query cache-busters are deliberately
-   discarded and do not force fresh edge content.
+7. Repeat production read/conditional/CORS probes. Configure the GitHub Worker
+   purge URL and matching token described above before resuming releases. Query
+   cache-busters are deliberately discarded and do not force fresh edge content.
 8. If cutover fails, pause releases, detach the Worker custom domain, restore the
    recorded R2 custom domain/public settings and prior DNS, and verify original
    URLs before resuming. Do not delete bucket objects or deployment history.
