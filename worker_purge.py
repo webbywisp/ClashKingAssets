@@ -57,8 +57,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def asset_cache_tag(key: str) -> str:
     family = (
-        'image:' + re.sub(r'\.(webp|png|jpe?g|avif)$', '', key, flags=re.I)
-        if re.search(r'\.(webp|png|jpe?g|avif)$', key, re.I)
+        'image:' + re.sub(r'\.(webp|png|jpe?g|avif)$', '', key, flags=re.IGNORECASE)
+        if re.search(r'\.(webp|png|jpe?g|avif)$', key, re.IGNORECASE)
         else 'file:' + key
     )
     return 'asset-' + hashlib.sha256(family.encode('utf-8')).hexdigest()
