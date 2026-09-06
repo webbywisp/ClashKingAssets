@@ -162,6 +162,16 @@ func (e *inProcessAnimationEncoder) Close() error {
 			e.err = fmt.Errorf("no WebP animation frames")
 			return
 		}
+		// Deduplication can collapse an entire timeline into a single frame.
+		// Encode its full canvas as a still, not an ANIM/ANMF container.
+		if len(e.frames) == 1 {
+			if e.frames[0].err != nil {
+				e.err = e.frames[0].err
+				return
+			}
+			e.err = (InProcessEncoder{}).EncodeStill(e.writer, e.previous, e.opts)
+			return
+		}
 		for index, frame := range e.frames {
 			if frame.err != nil {
 				e.err = fmt.Errorf("encode WebP animation frame %d: %w", index, frame.err)

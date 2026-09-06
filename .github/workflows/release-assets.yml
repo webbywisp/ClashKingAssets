@@ -6,7 +6,7 @@ on:
       - published
 
 concurrency:
-  group: release-assets-${{ github.event.release.tag_name }}
+  group: release-assets-r2
   cancel-in-progress: false
 
 jobs:
@@ -44,4 +44,7 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          ASSETS_WORKER_PURGE_URL: ${{ vars.ASSETS_WORKER_PURGE_URL }}
+          ASSETS_WORKER_PURGE_TOKEN: ${{ secrets.ASSETS_WORKER_PURGE_TOKEN }}
+          ASSETS_WORKER_PURGE_REQUIRED: 'true'
         run: python build.py

@@ -2,7 +2,7 @@ const MANIFEST_URL = "https://assets.clashk.ing/manifest.json";
 const CACHE_KEY = "clashking-asset-viewer-manifest-v1";
 const PREFERENCES_KEY = "clashking-asset-viewer-preferences-v1";
 const CACHE_TTL_MS = 30 * 60 * 1000;
-const IMAGE_EXTENSIONS = new Set(["gif", "jpeg", "jpg", "png", "svg", "webp"]);
+const IMAGE_EXTENSIONS = new Set(["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"]);
 
 const els = {
   app: document.getElementById("app"),
@@ -57,18 +57,17 @@ function labelForCategory(category) {
   return category.replaceAll("-", " ").replaceAll("_", " ");
 }
 
-function assetFromManifestEntry(entry, index) {
+function assetFromManifestEntry(entry, index, category, manifestUrl) {
   if (!entry || typeof entry.path !== "string" || entry.path.startsWith("bot/")) {
     return null;
   }
 
-  const extension = entry.extension?.toLowerCase();
+  const extension = entry.path.split(".").pop()?.toLowerCase();
   if (
     !extension
     || !IMAGE_EXTENSIONS.has(extension)
-    || typeof entry.category !== "string"
     || typeof entry.display_name !== "string"
-    || typeof entry.url !== "string"
+    || typeof category !== "string"
   ) {
     return null;
   }
@@ -76,11 +75,11 @@ function assetFromManifestEntry(entry, index) {
   return {
     id: index,
     path: entry.path,
-    category: entry.category,
+    category,
     name: entry.display_name,
     ext: extension,
-    url: entry.url,
-    haystack: `${entry.path} ${entry.display_name} ${entry.category} ${extension}`.toLowerCase(),
+    url: new URL(entry.path.split("/").map(encodeURIComponent).join("/"), manifestUrl).href,
+    haystack: `${entry.path} ${entry.display_name} ${category} ${extension}`.toLowerCase(),
   };
 }
 
@@ -136,14 +135,17 @@ async function fetchAssets() {
   const cached = readCachedAssets();
   if (cached) return cached;
 
-  const response = await fetch(manifestSource());
+  const source = manifestSource();
+  const response = await fetch(source);
   if (!response.ok) {
     throw new Error(`Asset manifest request failed: ${response.status}`);
   }
 
   const data = await response.json();
-  const assets = (data.assets || [])
-    .map(assetFromManifestEntry)
+  const assets = Object.entries(data.assets || {})
+    .flatMap(([category, entries]) => Array.isArray(entries)
+      ? entries.map((entry, index) => assetFromManifestEntry(entry, index, category, source))
+      : [])
     .filter(Boolean);
   writeCachedAssets(assets);
   return assets;

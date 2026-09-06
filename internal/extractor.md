@@ -4,10 +4,10 @@ This repository includes a Go CLI for turning Supercell `.sc` and `.sctx` files 
 
 ## Repository Layout
 
-- [`main.go`](main.go): CLI entrypoint
-- [`internal/render/`](internal/render): export pipeline, batching, manifests, and image encoding
-- [`internal/sc/`](internal/sc): `.sc` and texture parsing
-- [`internal/sc3d/`](internal/sc3d): embedded browser viewer for hero and skin models
+- [`main.go`](../main.go): CLI entrypoint
+- [`internal/render/`](render): export pipeline, batching, manifests, and image encoding
+- [`internal/sc/`](sc): `.sc` and texture parsing
+- [`internal/sc3d/`](sc3d): embedded browser viewer for hero and skin models
 
 ## Prerequisites
 
