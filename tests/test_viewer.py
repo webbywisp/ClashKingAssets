@@ -7,9 +7,10 @@ def test_viewer_consumes_hosted_manifest_contract():
     assert 'const MANIFEST_URL = "https://assets.clashk.ing/manifest.json"' in source
     assert "api.github.com" not in source
     assert "Object.entries(data.assets || {})" in source
-    assert "assetFromManifestEntry(entry, index, category)" in source
+    assert "assetFromManifestEntry(entry, index, category, manifestUrl)" in source
     assert 'entry.path.split(".").pop()' in source
-    assert 'new URL(entry.path.split("/").map(encodeURIComponent).join("/"), MANIFEST_URL).href' in source
+    assert 'new URL(entry.path.split("/").map(encodeURIComponent).join("/"), manifestUrl).href' in source
+    assert "const source = manifestSource()" in source
     for field in ("entry.path", "entry.display_name"):
         assert field in source
 

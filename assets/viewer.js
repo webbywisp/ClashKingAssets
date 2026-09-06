@@ -57,7 +57,7 @@ function labelForCategory(category) {
   return category.replaceAll("-", " ").replaceAll("_", " ");
 }
 
-function assetFromManifestEntry(entry, index, category) {
+function assetFromManifestEntry(entry, index, category, manifestUrl) {
   if (!entry || typeof entry.path !== "string" || entry.path.startsWith("bot/")) {
     return null;
   }
@@ -78,7 +78,7 @@ function assetFromManifestEntry(entry, index, category) {
     category,
     name: entry.display_name,
     ext: extension,
-    url: new URL(entry.path.split("/").map(encodeURIComponent).join("/"), MANIFEST_URL).href,
+    url: new URL(entry.path.split("/").map(encodeURIComponent).join("/"), manifestUrl).href,
     haystack: `${entry.path} ${entry.display_name} ${category} ${extension}`.toLowerCase(),
   };
 }
@@ -135,7 +135,8 @@ async function fetchAssets() {
   const cached = readCachedAssets();
   if (cached) return cached;
 
-  const response = await fetch(manifestSource());
+  const source = manifestSource();
+  const response = await fetch(source);
   if (!response.ok) {
     throw new Error(`Asset manifest request failed: ${response.status}`);
   }
@@ -143,7 +144,7 @@ async function fetchAssets() {
   const data = await response.json();
   const assets = Object.entries(data.assets || {})
     .flatMap(([category, entries]) => Array.isArray(entries)
-      ? entries.map((entry, index) => assetFromManifestEntry(entry, index, category))
+      ? entries.map((entry, index) => assetFromManifestEntry(entry, index, category, source))
       : [])
     .filter(Boolean);
   writeCachedAssets(assets);
